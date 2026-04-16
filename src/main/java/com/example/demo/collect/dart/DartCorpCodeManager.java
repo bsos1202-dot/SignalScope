@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -36,6 +37,9 @@ public class DartCorpCodeManager {
     // 6자리 주식코드 -> 8자리 DART 고유번호 매핑 저장소
     private final Map<String, String> stockToDartCodeMap = new ConcurrentHashMap<>();
     private final AtomicBoolean loadingStarted = new AtomicBoolean(false);
+    private final AtomicBoolean loadingCompleted = new AtomicBoolean(false);
+    private final AtomicInteger totalParsedEntries = new AtomicInteger(0);
+    private final AtomicInteger mappedStockEntries = new AtomicInteger(0);
 
     @PostConstruct
     public void init() {
@@ -55,7 +59,10 @@ public class DartCorpCodeManager {
             String url = "https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=" + dartApiKey;
             byte[] zipData = restTemplate.getForObject(url, byte[].class);
 
-            if (zipData == null) return;
+            if (zipData == null) {
+                log.warn("DART 고유번호 맵핑 파일 수집 결과가 비어 있습니다.");
+                return;
+            }
 
             // ZIP 압축 풀기
             try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipData))) {
@@ -74,6 +81,12 @@ public class DartCorpCodeManager {
             }
         } catch (Exception e) {
             log.error("DART 고유번호 맵핑 파일 수집 실패", e);
+        } finally {
+            if (loadingCompleted.get()) {
+                log.info("DART 고유번호 로딩 최종 상태: {}", getLoadingStatusSummary());
+            } else {
+                log.warn("DART 고유번호 로딩이 완료되지 않았습니다. 현재 상태: {}", getLoadingStatusSummary());
+            }
         }
     }
 
@@ -83,6 +96,9 @@ public class DartCorpCodeManager {
         Document doc = builder.parse(new ByteArrayInputStream(xmlBytes));
 
         NodeList list = doc.getElementsByTagName("list");
+        totalParsedEntries.set(list.getLength());
+        mappedStockEntries.set(0);
+        log.info("DART XML 파싱 시작 - 전체 list 노드 {}건", list.getLength());
         for (int i = 0; i < list.getLength(); i++) {
             Element element = (Element) list.item(i);
             String corpCode = element.getElementsByTagName("corp_code").item(0).getTextContent();
@@ -91,8 +107,15 @@ public class DartCorpCodeManager {
             // 상장사(stock_code가 있는 기업)만 맵에 저장합니다.
             if (stockCode != null && !stockCode.trim().isEmpty()) {
                 stockToDartCodeMap.put(stockCode.trim(), corpCode.trim());
+                mappedStockEntries.incrementAndGet();
+            }
+
+            if ((i + 1) % 5000 == 0) {
+                log.info("DART XML 파싱 진행 - {}/{} 처리, 상장사 매핑 {}건",
+                        i + 1, list.getLength(), mappedStockEntries.get());
             }
         }
+        loadingCompleted.set(true);
         log.info("DART 매핑 데이터 로드 완료 (총 {}개 상장사)", stockToDartCodeMap.size());
     }
 
@@ -103,6 +126,20 @@ public class DartCorpCodeManager {
         if (stockToDartCodeMap.isEmpty()) {
             startAsyncLoadIfNeeded();
         }
-        return stockToDartCodeMap.get(stockCode);
+        String result = stockToDartCodeMap.get(stockCode);
+        if (result == null && !loadingCompleted.get()) {
+            log.warn("DART 매핑 로딩 중 요청 유입 - 종목코드 {}, 상태: {}", stockCode, getLoadingStatusSummary());
+        }
+        return result;
+    }
+
+    public String getLoadingStatusSummary() {
+        return String.format(
+                "started=%s, completed=%s, mappedStocks=%d, parsedEntries=%d",
+                loadingStarted.get(),
+                loadingCompleted.get(),
+                mappedStockEntries.get(),
+                totalParsedEntries.get()
+        );
     }
 }

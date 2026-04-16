@@ -51,6 +51,7 @@ public class AiAnalysisController {
         String dartCode = dartCorpCodeManager.getDartCode(stockCode);
         
         if (dartCode == null) {
+            log.warn("DART 코드 미매핑 - 종목코드 {}, 로딩상태 {}", stockCode, dartCorpCodeManager.getLoadingStatusSummary());
             return ResponseEntity.badRequest().body(Map.of(
                     "error", "DART 공시 조회가 지원되지 않는 비상장 종목이거나 코드가 잘못되었습니다."));
         }
