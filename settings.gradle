@@ -1,1 +1,5 @@
+plugins {
+    // Gradle이 Java 버전을 찾지 못할 때 자동으로 다운로드하게 해주는 공식 플러그인
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
 rootProject.name = 'AIS'
