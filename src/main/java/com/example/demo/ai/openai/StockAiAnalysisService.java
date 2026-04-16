@@ -54,7 +54,7 @@ public class StockAiAnalysisService {
     public AiTutorialResponse generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
         log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작", corpName);
 
-        // 1. 시장 현재 상태 수집 (한국투자증권 — 현재가·밸류에이션·52주 대비·RSI·체결강도 등)
+        // 1. 시장 현재 상태 수집 (한국투자증권 — 거래량·밸류·RSI·체결강도 등; LLM 입력에서는 등락·가격·52주% 제외)
         String validAccessToken = kisTokenManager.getAccessToken();
         KisStockResponse stockData = kisStockApiClient.getCurrentPrice(stockCode, validAccessToken);
         KisInvestmentIndicatorResponse kisInvest = kisStockApiClient.getInvestmentIndicator(stockCode, validAccessToken);
