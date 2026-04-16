@@ -41,3 +41,8 @@ out/
 
 # AI 튜토리얼 디스크 캐시 본문 (cache/tutorial/README.md 만 추적)
 cache/tutorial/*.json
+
+# 시장 뉴스·DART 일 캐시 본문 (각 README 만 추적)
+cache/market-news/*.json
+cache/dart/daily/**/*.json
+cache/dart/daily/**/*.zip

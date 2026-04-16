@@ -63,6 +63,8 @@ flowchart LR
 | `collect.dart` | DART API 클라이언트·DTO·설정 |
 | `collect.kis` | 한국투자증권 토큰·시세 API |
 | `collect.news` | 네이버 뉴스 API, 구글 뉴스(RSS 등) |
+| `collect.news.cache` | 시장 키워드 뉴스 **파일 캐시** (`MarketNewsFileCacheService`) |
+| `collect.dart.cache` | DART API **일 단위 파일 캐시** (`DartDailyFileCacheService`) |
 | `collect.naverboard` | 네이버 금융 **종목토론 목록** HTML 파싱 (비공식) |
 | `ai.openai` | OpenAI 호출, 튜토리얼용 프롬프트 조립 |
 | `ai.cache` | 튜토리얼 응답 **파일 캐시** (`TutorialCacheFile`, `AiTutorialFileCacheService`) |
@@ -122,6 +124,31 @@ flowchart LR
 
 ---
 
+## 4.2 시장 뉴스 파일 캐시 (코스피 / 코스닥 공통)
+
+| 항목 | 설명 |
+|------|------|
+| 목적 | 시장 키워드(예: `코스피 증시`, 구글 RSS `코스피`)는 **종목과 무관**하게 동일하므로, 튜토리얼 종목 캐시와 분리해 **시장 슬러그당 1파일**로 재사용한다. |
+| 위치 | `cache/market-news/{KOSPI\|KOSDAQ\|…}.json` (`app.market-news-cache.directory`) |
+| TTL | `app.market-news-cache.ttl-minutes`(기본 30). `app.market-news-cache.enabled=false` 시 매 요청 원본 API 호출. |
+| 형식 | `MarketNewsCacheEnvelope`: 네이버 응답 DTO + `List<RssNewsItem>` |
+| 문서 | [cache/market-news/README.md](./cache/market-news/README.md) |
+
+---
+
+## 4.3 DART 일 단위 파일 캐시
+
+| 항목 | 설명 |
+|------|------|
+| 목적 | 공시 목록·재무·지분·주요사항·원문 ZIP은 **당일 KST 기준**으로 바뀔 빈도가 낮은 편이므로, 동일 일자·동일 키에 대해 **하루 1회 수준**으로 DART 호출을 줄인다. |
+| 위치 | `cache/dart/daily/{yyyyMMdd}/` 하위에 JSON 및 `doc_{접수번호}.zip` (`app.dart-cache.directory`) |
+| 키 | 8자리 `corp_code` + API 종류 + 조회 파라미터(날짜·페이지 등)를 파일명에 반영. |
+| 설정 | `app.dart-cache.enabled` 로 끄고 원본만 호출할 수 있다. |
+| 문서 | [cache/dart/daily/README.md](./cache/dart/daily/README.md) |
+| 운영 | 일자 폴더가 쌓이므로 **보관 일수 제한 배치**를 두는 것이 좋다. |
+
+---
+
 ## 5. 종목 목록 캐시
 
 `StockCacheService`는 KIS에서 제공하는 **마스터 ZIP** URL에서 종목 정보를 내려받아 파싱하고,  
@@ -145,6 +172,17 @@ flowchart LR
 - **네이버 금융 종목토론**은 DOM 구조(`table.type2`, `tr[onmouseover]` 등)에 의존한다. 마크업이 바뀌면 **클라이언트 수정**이 필요하다.
 - 스크래핑은 **차단·약관 위반 가능성**이 있으므로, 장기적으로는 허용된 공식 데이터 소스로 대체하는 것이 안전하다.
 
+### 7.1 한화투자증권 WM 「기업·산업분석」 목록 스크래핑 검토
+
+참고 URL: [한화 WM 투자정보 > 기업·산업분석](https://www.hanwhawm.com/main/research/main/list.cmd?depth2_id=1002&mode=depth2)
+
+| 관점 | 평가 |
+|------|------|
+| **법·약관** | 리포트 제목·요약·본문은 **저작권·2차 저작물** 이슈가 크다. 약관상 자동 수집·재배포가 금지되거나 제한될 수 있어 **법무 검토 없이 MTS에 반영하지 않는 것**이 안전하다. |
+| **기술** | 목록은 HTML·세션·봇 방어(캡차·레이트 리밋)에 의존할 수 있어, DOM 변경 시 **유지보수 비용이 네이버 종목토론과 동급 이상**으로 간주한다. |
+| **대안** | 한화(또는 타사)와 **제휴·RSS·REST 피드**로 공식 제공받거나, **DART·뉴스·벤더(FnGuide 등)** 조합으로 리서치 맥락을 구성하는 편이 운영·컴플라이언스에 유리하다. |
+| **결론** | 데모·내부 PoC 외 **상용 MTS 기본 경로로 스크래핑 도입은 비권장**. 반드시 도입 시 별도 **동의·계약·출처 표기·저장 주기** 정책을 둔다. |
+
 ---
 
 ## 8. 확장 포인트
@@ -155,7 +193,17 @@ flowchart LR
 
 ---
 
-## 9. 참고 링크
+## 9. 소스 전반 유지보수 점검 (캐시·외부 연동)
+
+- **캐시 경계**: 종목 튜토리얼(`cache/tutorial`) / 시장 뉴스(`cache/market-news`) / DART 일 캐시(`cache/dart/daily`)를 **역할별로 분리**해, TTL·무효화·용량 정책을 각 README와 `application.properties`에만 모아 둔다.  
+- **플래그**: `app.dart-cache.enabled`, `app.market-news-cache.enabled`로 장애 시 외부만 우회할 수 있게 한다.  
+- **스키마 버전**: 튜토리얼 응답 JSON은 `TutorialCacheFile.version`으로 구버전 파일을 HIT하지 않게 한다. 시장·DART 캐시도 필요 시 동일 패턴으로 확장한다.  
+- **수집기 단일 책임**: `DartApiClient`는 HTTP만, 일 캐시는 `DartDailyFileCacheService`에 모아 **한 곳에서만** 디스크 정책을 바꾼다.  
+- **향후**: 공시 ZIP 용량이 크면 **텍스트 스니펫만** 별도 캐시하거나, 오브젝트 스토리지로 이전하는 것이 디스크 I/O에 유리하다.
+
+---
+
+## 10. 참고 링크
 
 - [Spring Boot Gradle Plugin](https://docs.spring.io/spring-boot/4.0.4/gradle-plugin)
 - [Open DART API](https://opendart.fss.or.kr/)

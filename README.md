@@ -10,6 +10,8 @@
 - **종목 목록 API**: 인메모리 캐시에서 전체 종목 JSON 제공
 - **AI 튜토리얼 API**: DART·한국투자증권 시세·뉴스·네이버 종목토론(스크래핑) 등을 조합해 텍스트 응답
 - **튜토리얼 파일 캐시**: 동일 6자리 종목에 대해 설정한 TTL(기본 10분) 안에서는 `cache/tutorial/{코드}.json`에 저장된 응답을 그대로 반환해 외부 API·OpenAI 호출을 줄입니다. 상세는 [cache/tutorial/README.md](./cache/tutorial/README.md) 참고.
+- **시장 뉴스 파일 캐시**: 코스피/코스닥 등 시장 키워드 뉴스는 종목과 무관하게 공유되므로 `cache/market-news/`에 시장별로 저장합니다. [cache/market-news/README.md](./cache/market-news/README.md)
+- **DART 일 캐시**: KST 날짜별 폴더에 공시·재무·원문 ZIP 등을 저장해 같은 날 DART 호출을 줄입니다. [cache/dart/daily/README.md](./cache/dart/daily/README.md)
 
 ## 기술 스택
 
@@ -47,6 +49,12 @@
 | `app.tutorial-cache.directory` | 캐시 JSON 저장 디렉터리 (기본 `cache/tutorial`). 컨테이너·NAS 마운트 경로로 바꾸는 것을 권장합니다. |
 | `app.tutorial-cache.ttl-minutes` | 같은 종목 재요청 시 디스크 캐시를 쓸 최대 유효 시간(분, 기본 `10`). |
 
+| `app.market-news-cache.directory` | 시장 뉴스 캐시 디렉터리 (기본 `cache/market-news`). |
+| `app.market-news-cache.ttl-minutes` | 시장별 네이버·구글 시장 뉴스 스냅샷 TTL(분, 기본 `30`). |
+| `app.market-news-cache.enabled` | 시장 뉴스 파일 캐시 사용 여부 (기본 `true`). |
+| `app.dart-cache.directory` | DART 일 캐시 루트 (기본 `cache/dart/daily`). |
+| `app.dart-cache.enabled` | DART 일 캐시 사용 여부 (기본 `true`). |
+
 캐시 적중 여부는 응답 헤더 `X-AIS-Tutorial-Cache`(값 `HIT` / `MISS`), 생성·만료 시각은 `X-AIS-Tutorial-Cache-Generated`, `X-AIS-Tutorial-Cache-Expires`(ISO-8601)로 확인할 수 있습니다.
 
 ### MTS·운영 관점 요약
@@ -83,7 +91,7 @@
 ## 주의사항
 
 - **네이버 종목토론방** 데이터는 공식 API가 아니라 **HTML 스크래핑**이며, 페이지 구조 변경 시 동작이 깨질 수 있습니다. 이용약관·robots 정책은 각 서비스 기준을 따르세요.
-- `stock_list_cache.json` 등 로컬 캐시 파일은 환경에 따라 생성·갱신됩니다.
+- `stock_list_cache.json` 및 `cache/market-news/`, `cache/dart/daily/` 등 로컬 캐시는 환경에 따라 생성·갱신됩니다.
 
 ## 라이선스 및 기여
 

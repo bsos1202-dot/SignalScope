@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
 import com.example.demo.collect.dart.DartApiClient;
+import com.example.demo.collect.dart.cache.DartDailyFileCacheService;
 import com.example.demo.collect.dart.dto.DisclosureResponse;
 import com.example.demo.collect.dart.dto.FinancialResponse;
 import com.example.demo.collect.dart.dto.OwnershipResponse;
@@ -32,6 +33,7 @@ import com.example.demo.ai.dto.TutorialEvidence.DisclosureRef;
 import com.example.demo.ai.dto.TutorialEvidence.NewsRef;
 import com.example.demo.collect.news.GoogleNewsApiClient;
 import com.example.demo.collect.news.NaverNewsApiClient;
+import com.example.demo.collect.news.cache.MarketNewsFileCacheService;
 import com.example.demo.collect.news.dto.NaverNewsResponse;
 import com.example.demo.collect.news.dto.RssNewsItem;
 
@@ -44,6 +46,8 @@ import lombok.extern.slf4j.Slf4j;
 public class StockAiAnalysisService {
 
     private final DartApiClient dartApiClient;
+    private final DartDailyFileCacheService dartDailyFileCacheService;
+    private final MarketNewsFileCacheService marketNewsFileCacheService;
     private final NaverNewsApiClient naverNewsApiClient;
     private final GoogleNewsApiClient googleNewsApiClient;
     private final KisStockApiClient kisStockApiClient;
@@ -62,23 +66,31 @@ public class StockAiAnalysisService {
         KisMarketMetrics kisMetrics = buildKisMarketMetrics(stockData, kisInvest, kisCcnl);
         String parsedStockStatus = kisMetrics.llmContextBlock();
 
-        // 2. 팩트 데이터 수집 (DART - 8자리 고유번호 사용)
-        DisclosureResponse disclosureData = dartApiClient.searchDisclosures(dartCode, today, today, "1", "10");
-        FinancialResponse financialData = dartApiClient.getFinancialInfo(dartCode, "2023", "11011");
-        OwnershipResponse ownershipData = dartApiClient.getOwnershipDisclosures(dartCode);
-        DisclosureResponse majorIssuesData = dartApiClient.getMajorManagementIssues(dartCode, today, today);
+        // 2. 팩트 데이터 수집 (DART — KST 일자별 파일 캐시로 동일 일 재호출 최소화)
+        DisclosureResponse disclosureData = dartDailyFileCacheService.loadDisclosureList(
+                dartCode, today, today, "1", "10",
+                () -> dartApiClient.searchDisclosures(dartCode, today, today, "1", "10"));
+        FinancialResponse financialData = dartDailyFileCacheService.loadFinancial(
+                dartCode, "2023", "11011",
+                () -> dartApiClient.getFinancialInfo(dartCode, "2023", "11011"));
+        OwnershipResponse ownershipData = dartDailyFileCacheService.loadOwnership(
+                dartCode, () -> dartApiClient.getOwnershipDisclosures(dartCode));
+        DisclosureResponse majorIssuesData = dartDailyFileCacheService.loadMajorIssues(
+                dartCode, today, today,
+                () -> dartApiClient.getMajorManagementIssues(dartCode, today, today));
 
         // 공시 상세 원문(ZIP) 수집 및 텍스트 파싱
         String documentSummary = "최신 원문 없음";
         if (disclosureData != null && disclosureData.list() != null && !disclosureData.list().isEmpty()) {
-            String rceptNo = disclosureData.list().get(0).rceptNo(); 
-            byte[] zipData = dartApiClient.getDisclosureDocument(rceptNo);
+            String rceptNo = disclosureData.list().get(0).rceptNo();
+            byte[] zipData = dartDailyFileCacheService.loadDisclosureDocument(
+                    rceptNo, () -> dartApiClient.getDisclosureDocument(rceptNo));
             documentSummary = extractTextFromZip(zipData);
         }
 
         String parsedDisclosures = extractDisclosures(disclosureData);
         String parsedFinancials = extractFinancials(financialData);
-        String parsedOwnership = extractOwnerships(ownershipData);
+        String ownershipLlmBlock = buildOwnershipLlmBlock(ownershipData);
         String parsedMajorIssues = extractDisclosures(majorIssuesData); // 재사용
 
         // 3. 시장 반응 데이터 수집 (멀티 채널 뉴스 - 종목명 기반 검색)
@@ -93,13 +105,29 @@ public class StockAiAnalysisService {
                 .collect(Collectors.toList());
         String parsedGoogleNews = String.join("\n", googleNewsList);
 
-        List<RssNewsItem> googleRssMarket = (market != null && !market.isBlank())
-                ? googleNewsApiClient.searchNewsItems(market, 3)
-                : Collections.emptyList();
+        String marketNewsKeyword = (market != null && !market.isBlank()) ? (market.trim() + " 증시") : "";
+        NaverNewsResponse naverMarketData = null;
+        List<RssNewsItem> googleRssMarket = Collections.emptyList();
+        if (!marketNewsKeyword.isBlank()) {
+            var marketCached = marketNewsFileCacheService.readIfValid(market.trim());
+            if (marketCached.isPresent()) {
+                naverMarketData = marketCached.get().naverMarket();
+                googleRssMarket = marketCached.get().googleMarket();
+            } else {
+                naverMarketData = naverNewsApiClient.searchNews(marketNewsKeyword, 3);
+                googleRssMarket = googleNewsApiClient.searchNewsItems(market.trim(), 3);
+                marketNewsFileCacheService.put(market.trim(), naverMarketData, googleRssMarket);
+            }
+        }
+        String parsedNaverNewsMarket = marketNewsKeyword.isBlank()
+                ? "(시장 구분 없음 — 시장 키워드 뉴스 생략)"
+                : extractNaverNews(naverMarketData);
         List<String> googleNewsListMarket = googleRssMarket.stream()
                 .map(i -> "- [구글] " + i.title() + " (" + i.pubDate() + ")")
                 .collect(Collectors.toList());
-        String parsedGoogleNewsMarket = String.join("\n", googleNewsListMarket);
+        String parsedGoogleNewsMarket = marketNewsKeyword.isBlank()
+                ? "(시장 구분 없음 — 시장 키워드 뉴스 생략)"
+                : String.join("\n", googleNewsListMarket);
 
         // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑)
         List<StockBoardPost> boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
@@ -108,11 +136,14 @@ public class StockAiAnalysisService {
         
         log.info("[한국투자증권] 주가정보 - " + parsedStockStatus);
         log.info("[DART] 공시정보 - " + parsedFinancials);
-        log.info("[DART] 소유정보 - " + parsedOwnership);
+        log.info("[DART] 소유정보 - {}", ownershipLlmBlock.isBlank()
+                ? "(발췌 없음 — 분석·증거에서 제외)"
+                : ownershipLlmBlock.replace("\n", " | "));
         log.info("[DART] 주요정보 - " + parsedMajorIssues);
         log.info("[네이버API] 뉴스 - " + parsedNaverNews);
         log.info("[구글RSS] 뉴스 - " + parsedGoogleNews);
-        log.info("[구글RSS] 뉴스 - " + parsedGoogleNewsMarket);
+        log.info("[네이버API] 시장 키워드 뉴스 - {}", parsedNaverNewsMarket);
+        log.info("[구글RSS] 시장 키워드 뉴스 - {}", parsedGoogleNewsMarket);
         log.info("[네이버종목토론] 요약 - {}", boardSentimentHint);
 
         // 5. WHY Approach 시스템 프롬프트 조립
@@ -137,24 +168,30 @@ public class StockAiAnalysisService {
             2. 발생한 공시: %s
             3. 재무 지표: %s
             4. 공시 상세 원문 요약: %s
-            
+            %s
             [시장 반응 데이터]
-            5. 네이버 뉴스 동향:
+            5. 네이버 뉴스 동향(종목 키워드):
             %s
-            6. 구글 뉴스 동향:
+            6. 구글 뉴스 동향(종목 키워드):
             %s
+            7. 네이버 뉴스(시장 키워드 — 코스피/코스닥 등):
+            %s
+            8. 구글 RSS 뉴스(시장 키워드):
             %s
             
             [커뮤니티 반응 — 네이버 종목토론방 최신 글 5개]
-            7. 여론 요약(추천/비추천 합계 기반 참고): %s
+            9. 여론 요약(추천/비추천 합계 기반 참고): %s
             %s
             
             위 사실을 바탕으로:
             - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
             - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
             - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
-            를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·% 수치는 언급하지 말 것.)
-            """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary, parsedNaverNews, parsedGoogleNews, parsedGoogleNewsMarket, boardSentimentHint, parsedBoardPosts);
+            를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것.)
+            """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary,
+                ownershipSectionForPrompt(ownershipLlmBlock),
+                parsedNaverNews, parsedGoogleNews, parsedNaverNewsMarket, parsedGoogleNewsMarket,
+                boardSentimentHint, parsedBoardPosts);
 
         String summary = openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
         TutorialEvidence evidence = buildTutorialEvidence(
@@ -167,6 +204,7 @@ public class StockAiAnalysisService {
                 documentSummary,
                 naverData,
                 googleRssKeyword,
+                naverMarketData,
                 googleRssMarket,
                 boardPosts,
                 boardSentimentHint
@@ -184,6 +222,7 @@ public class StockAiAnalysisService {
             String disclosureDocumentSnippet,
             NaverNewsResponse naverData,
             List<RssNewsItem> googleRssKeyword,
+            NaverNewsResponse naverMarketData,
             List<RssNewsItem> googleRssMarket,
             List<StockBoardPost> boardPosts,
             String boardSentimentHint
@@ -198,6 +237,7 @@ public class StockAiAnalysisService {
                 disclosureDocumentSnippet,
                 toNaverNewsRefs(naverData),
                 toGoogleNewsRefs(googleRssKeyword),
+                toNaverNewsRefs(naverMarketData),
                 toGoogleNewsRefs(googleRssMarket),
                 toBoardRefs(boardPosts),
                 boardSentimentHint
@@ -309,13 +349,75 @@ public class StockAiAnalysisService {
     }
 
     private List<String> toOwnershipLines(OwnershipResponse data) {
-        if (data == null || data.list() == null || data.list().isEmpty()) {
+        if (!hasMeaningfulOwnership(data)) {
             return List.of();
         }
         return data.list().stream()
+                .filter(this::ownershipItemHasContent)
                 .limit(5)
-                .map(item -> "보고자: " + item.repror() + ", 지분율: " + item.ownershipRate() + "%")
+                .map(this::formatOwnershipEvidenceLine)
                 .collect(Collectors.toList());
+    }
+
+    /** 보고자·소유수·지분율 중 하나라도 유효하면 true (문자열 "null"·공백은 무효). */
+    private boolean hasMeaningfulOwnership(OwnershipResponse data) {
+        if (data == null || data.list() == null || data.list().isEmpty()) {
+            return false;
+        }
+        return data.list().stream().anyMatch(this::ownershipItemHasContent);
+    }
+
+    private boolean ownershipItemHasContent(OwnershipResponse.OwnershipItem item) {
+        if (item == null) {
+            return false;
+        }
+        return !isBlankOrNullLiteral(item.repror())
+                || !isBlankOrNullLiteral(item.ownedQty())
+                || !isBlankOrNullLiteral(item.ownershipRate());
+    }
+
+    private static boolean isBlankOrNullLiteral(String s) {
+        if (s == null) {
+            return true;
+        }
+        String t = s.trim();
+        return t.isEmpty() || "null".equalsIgnoreCase(t);
+    }
+
+    private String formatOwnershipEvidenceLine(OwnershipResponse.OwnershipItem item) {
+        List<String> parts = new ArrayList<>();
+        if (!isBlankOrNullLiteral(item.repror())) {
+            parts.add("보고자: " + item.repror().trim());
+        }
+        if (!isBlankOrNullLiteral(item.ownedQty())) {
+            parts.add("소유주식수: " + item.ownedQty().trim());
+        }
+        if (!isBlankOrNullLiteral(item.ownershipRate())) {
+            parts.add("지분율: " + item.ownershipRate().trim() + "%");
+        }
+        return String.join(", ", parts);
+    }
+
+    /** LLM용 지분 발췌 본문(항목당 한 줄). 유효 데이터 없으면 빈 문자열. */
+    private String buildOwnershipLlmBlock(OwnershipResponse data) {
+        if (!hasMeaningfulOwnership(data)) {
+            return "";
+        }
+        return data.list().stream()
+                .filter(this::ownershipItemHasContent)
+                .limit(5)
+                .map(item -> "- " + formatOwnershipEvidenceLine(item))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private static String ownershipSectionForPrompt(String ownershipLlmBlock) {
+        if (ownershipLlmBlock == null || ownershipLlmBlock.isBlank()) {
+            return "";
+        }
+        return """
+            
+            [지분 공시 발췌 — DART 임원·주요주주 소유보고]
+            """ + ownershipLlmBlock;
     }
 
     private List<NewsRef> toNaverNewsRefs(NaverNewsResponse data) {
@@ -401,14 +503,6 @@ public class StockAiAnalysisService {
         if (data == null || data.list() == null || data.list().isEmpty()) return "- 재무 정보 업데이트 없음";
         return data.list().stream()
                 .map(item -> "- " + item.accountNm() + ": " + formatNumber(item.currentAmount()) + "원")
-                .collect(Collectors.joining("\n"));
-    }
-
-    private String extractOwnerships(OwnershipResponse data) {
-        if (data == null || data.list() == null || data.list().isEmpty()) return "- 지분 변동 없음";
-        return data.list().stream()
-                .limit(5)
-                .map(item -> "- 보고자: " + item.repror() + ", 지분율: " + item.ownershipRate() + "%")
                 .collect(Collectors.joining("\n"));
     }
 
