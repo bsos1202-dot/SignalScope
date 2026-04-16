@@ -88,7 +88,7 @@ flowchart LR
    - 시스템 프롬프트: 초보 대상 톤, 현재가 직접 노출 지양, **토론글은 개인 의견**임을 명시.  
    - 유저 프롬프트: 위 수집 문자열을 섹션별로 삽입 후 `OpenAiDirectClient`로 Chat Completions 요청.
 
-응답은 **plain text** (`text/plain; charset=UTF-8`) 로 반환하고, 프론트는 줄바꿈을 `<br>` 로 치환해 표시한다.
+`/ai/tutorial` 응답은 **JSON** (`AiTutorialResponse`)이며, `summary`(LLM 본문)와 `evidence`(참조한 시세 문구·DART 공시·뉴스·종목토론 메타 등)를 함께 반환한다. 프론트(`search.html`)는 요약을 표시하고, `<details>`로 근거 목록을 접었다 펼칠 수 있다.
 
 ---
 

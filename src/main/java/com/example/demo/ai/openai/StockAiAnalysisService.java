@@ -2,6 +2,8 @@ package com.example.demo.ai.openai;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
@@ -19,9 +21,15 @@ import com.example.demo.collect.kis.KisTokenManager;
 import com.example.demo.collect.kis.dto.KisStockResponse;
 import com.example.demo.collect.naverboard.NaverStockBoardClient;
 import com.example.demo.collect.naverboard.dto.StockBoardPost;
+import com.example.demo.ai.dto.AiTutorialResponse;
+import com.example.demo.ai.dto.TutorialEvidence;
+import com.example.demo.ai.dto.TutorialEvidence.BoardRef;
+import com.example.demo.ai.dto.TutorialEvidence.DisclosureRef;
+import com.example.demo.ai.dto.TutorialEvidence.NewsRef;
 import com.example.demo.collect.news.GoogleNewsApiClient;
 import com.example.demo.collect.news.NaverNewsApiClient;
 import com.example.demo.collect.news.dto.NaverNewsResponse;
+import com.example.demo.collect.news.dto.RssNewsItem;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,7 +47,7 @@ public class StockAiAnalysisService {
     private final OpenAiDirectClient openAiDirectClient;
     private final NaverStockBoardClient naverStockBoardClient;
 
-    public String generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
+    public AiTutorialResponse generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
         log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작", corpName);
 
         // 1. 시장 현재 상태 수집 (한국투자증권 실시간 시세 - 6자리 코드 사용)
@@ -72,10 +80,18 @@ public class StockAiAnalysisService {
         NaverNewsResponse naverData = naverNewsApiClient.searchNews(newsKeyword, 3);
         String parsedNaverNews = extractNaverNews(naverData);
         
-        List<String> googleNewsList = googleNewsApiClient.searchNews(newsKeyword, 5);
+        List<RssNewsItem> googleRssKeyword = googleNewsApiClient.searchNewsItems(newsKeyword, 5);
+        List<String> googleNewsList = googleRssKeyword.stream()
+                .map(i -> "- [구글] " + i.title() + " (" + i.pubDate() + ")")
+                .collect(Collectors.toList());
         String parsedGoogleNews = String.join("\n", googleNewsList);
-        
-        List<String> googleNewsListMarket = googleNewsApiClient.searchNews(market, 3);
+
+        List<RssNewsItem> googleRssMarket = (market != null && !market.isBlank())
+                ? googleNewsApiClient.searchNewsItems(market, 3)
+                : Collections.emptyList();
+        List<String> googleNewsListMarket = googleRssMarket.stream()
+                .map(i -> "- [구글] " + i.title() + " (" + i.pubDate() + ")")
+                .collect(Collectors.toList());
         String parsedGoogleNewsMarket = String.join("\n", googleNewsListMarket);
 
         // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑)
@@ -132,7 +148,134 @@ public class StockAiAnalysisService {
             를 3~4줄로 쉽게 설명해 줘.
             """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary, parsedNaverNews, parsedGoogleNews, parsedGoogleNewsMarket, boardSentimentHint, parsedBoardPosts);
 
-        return openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
+        String summary = openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
+        TutorialEvidence evidence = buildTutorialEvidence(
+                parsedStockStatus,
+                disclosureData,
+                majorIssuesData,
+                financialData,
+                ownershipData,
+                documentSummary,
+                naverData,
+                googleRssKeyword,
+                googleRssMarket,
+                boardPosts,
+                boardSentimentHint
+        );
+        return new AiTutorialResponse(summary, evidence);
+    }
+
+    private TutorialEvidence buildTutorialEvidence(
+            String stockQuoteLine,
+            DisclosureResponse disclosureData,
+            DisclosureResponse majorIssuesData,
+            FinancialResponse financialData,
+            OwnershipResponse ownershipData,
+            String disclosureDocumentSnippet,
+            NaverNewsResponse naverData,
+            List<RssNewsItem> googleRssKeyword,
+            List<RssNewsItem> googleRssMarket,
+            List<StockBoardPost> boardPosts,
+            String boardSentimentHint
+    ) {
+        return new TutorialEvidence(
+                stockQuoteLine,
+                toDisclosureRefs(disclosureData),
+                toDisclosureRefs(majorIssuesData),
+                toFinancialLines(financialData),
+                toOwnershipLines(ownershipData),
+                disclosureDocumentSnippet,
+                toNaverNewsRefs(naverData),
+                toGoogleNewsRefs(googleRssKeyword),
+                toGoogleNewsRefs(googleRssMarket),
+                toBoardRefs(boardPosts),
+                boardSentimentHint
+        );
+    }
+
+    private List<DisclosureRef> toDisclosureRefs(DisclosureResponse data) {
+        if (data == null || data.list() == null || data.list().isEmpty()) {
+            return List.of();
+        }
+        return data.list().stream()
+                .map(item -> new DisclosureRef(
+                        item.rceptDt() != null ? item.rceptDt() : "",
+                        item.reportNm() != null ? item.reportNm() : "",
+                        item.rceptNo() != null ? item.rceptNo() : ""
+                ))
+                .collect(Collectors.toList());
+    }
+
+    private List<String> toFinancialLines(FinancialResponse data) {
+        if (data == null || data.list() == null || data.list().isEmpty()) {
+            return List.of();
+        }
+        return data.list().stream()
+                .limit(8)
+                .map(item -> item.accountNm() + ": " + formatNumber(item.currentAmount()) + "원")
+                .collect(Collectors.toList());
+    }
+
+    private List<String> toOwnershipLines(OwnershipResponse data) {
+        if (data == null || data.list() == null || data.list().isEmpty()) {
+            return List.of();
+        }
+        return data.list().stream()
+                .limit(5)
+                .map(item -> "보고자: " + item.repror() + ", 지분율: " + item.ownershipRate() + "%")
+                .collect(Collectors.toList());
+    }
+
+    private List<NewsRef> toNaverNewsRefs(NaverNewsResponse data) {
+        if (data == null || data.items() == null || data.items().isEmpty()) {
+            return List.of();
+        }
+        List<NewsRef> out = new ArrayList<>();
+        for (var item : data.items()) {
+            try {
+                String cleanTitle = item.title() != null ? item.title().replaceAll("<[^>]+>", "") : "";
+                String cleanDesc = item.description() != null ? item.description().replaceAll("<[^>]+>", "") : "";
+                cleanTitle = HtmlUtils.htmlUnescape(cleanTitle);
+                cleanDesc = HtmlUtils.htmlUnescape(cleanDesc);
+                String link = item.originallink() != null && !item.originallink().isBlank()
+                        ? item.originallink()
+                        : (item.link() != null ? item.link() : "");
+                out.add(new NewsRef(
+                        cleanTitle,
+                        link,
+                        item.pubDate() != null ? item.pubDate() : "",
+                        cleanDesc
+                ));
+            } catch (Exception e) {
+                log.debug("네이버 뉴스 항목 매핑 생략", e);
+            }
+        }
+        return out;
+    }
+
+    private List<NewsRef> toGoogleNewsRefs(List<RssNewsItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        return items.stream()
+                .map(i -> new NewsRef(i.title(), i.link(), i.pubDate(), ""))
+                .collect(Collectors.toList());
+    }
+
+    private List<BoardRef> toBoardRefs(List<StockBoardPost> posts) {
+        if (posts == null || posts.isEmpty()) {
+            return List.of();
+        }
+        return posts.stream()
+                .map(p -> new BoardRef(
+                        p.postedAt(),
+                        p.title(),
+                        p.url(),
+                        p.upvotes(),
+                        p.downvotes(),
+                        p.author()
+                ))
+                .collect(Collectors.toList());
     }
 
     // --- 데이터 추출 헬퍼 메서드들 ---

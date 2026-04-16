@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>당사 MTS 종목 검색</title>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; max-width: 600px; margin: auto; background-color: #f8f9fa; }
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; max-width: 640px; margin: auto; background-color: #f8f9fa; color: #333; }
         .search-container { position: relative; margin-bottom: 20px; }
         input[type="text"] { width: 100%; padding: 15px; font-size: 16px; border: 2px solid #0056b3; border-radius: 8px; box-sizing: border-box; }
         .autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-top: none; z-index: 1000; list-style: none; padding: 0; margin: 0; max-height: 250px; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 0 0 8px 8px; }
@@ -13,19 +13,83 @@
         .autocomplete-list li:hover { background-color: #e9ecef; }
         .stock-market { font-size: 0.8em; color: #fff; background-color: #17a2b8; padding: 2px 6px; border-radius: 4px; }
         .stock-code { color: #888; font-size: 0.9em; margin-right: 10px; }
-        
-        /* ⭐️ 튜토리얼 결과 영역 스타일 */
-        #resultContainer { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); display: none; line-height: 1.6; }
+
+        #resultContainer { display: none; }
         #loading { display: none; text-align: center; padding: 30px; color: #0056b3; font-weight: bold; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #0056b3; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .result-card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); line-height: 1.65; }
+        .summary-block { font-size: 1.05rem; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #eee; }
+
+        .indicator-bar {
+            background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fc 100%);
+            border: 1px solid #cfe2f3;
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+            font-size: 0.9rem;
+        }
+        .indicator-bar .quote-line { color: #0d47a1; font-weight: 600; margin-bottom: 8px; }
+        .indicator-bar .sentiment { color: #555; margin-bottom: 10px; font-size: 0.88rem; }
+        .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .chip {
+            display: inline-block;
+            background: #fff;
+            border: 1px solid #90caf9;
+            color: #1565c0;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+        }
+
+        details.evidence-panel {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+            margin-top: 4px;
+        }
+        details.evidence-panel > summary {
+            cursor: pointer;
+            padding: 12px 14px;
+            font-weight: 600;
+            color: #0056b3;
+            list-style: none;
+        }
+        details.evidence-panel > summary::-webkit-details-marker { display: none; }
+        details.evidence-panel[open] > summary { border-bottom: 1px solid #eee; }
+        .evidence-body { padding: 0 14px 14px; max-height: 70vh; overflow-y: auto; }
+
+        .evidence-section { margin-top: 14px; }
+        .evidence-section h4 {
+            margin: 0 0 8px 0;
+            font-size: 0.85rem;
+            color: #666;
+            text-transform: none;
+            letter-spacing: -0.02em;
+        }
+        .evidence-section ul { margin: 0; padding-left: 1.1rem; }
+        .evidence-section li { margin-bottom: 6px; font-size: 0.88rem; word-break: break-word; }
+        .evidence-section a { color: #0056b3; }
+        .snippet-box {
+            font-size: 0.82rem;
+            color: #444;
+            background: #fff;
+            border: 1px solid #eee;
+            padding: 10px;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .muted { color: #888; font-size: 0.8rem; }
     </style>
 </head>
 <body>
 
     <h2 style="color: #333;">어떤 종목이 궁금하신가요?</h2>
-    <p style="color: #666;">종목을 선택하시면 주가가 움직이는 이유(WHY)를 쉽게 설명해 드립니다.</p>
-    
+    <p style="color: #666;">종목을 선택하시면 주가가 움직이는 이유(WHY)를 쉽게 설명해 드립니다. 아래에서 참조한 공시·뉴스·종목토론을 펼쳐 볼 수 있습니다.</p>
+
     <div class="search-container">
         <input type="text" id="searchInput" placeholder="종목명 입력 (예: 삼성)" autocomplete="off">
         <ul id="autoCompleteList" class="autocomplete-list"></ul>
@@ -38,6 +102,144 @@
     <div id="resultContainer"></div>
 
     <script>
+        function escapeHtml(text) {
+            if (text == null || text === undefined) return "";
+            const div = document.createElement("div");
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function nl2brEscaped(text) {
+            return escapeHtml(text).replace(/\n/g, "<br>");
+        }
+
+        function renderTutorialPayload(data) {
+            const summary = data.summary || "";
+            const ev = data.evidence || {};
+            const dDart = (ev.dartDisclosures || []).length;
+            const dMajor = (ev.dartMajorIssues || []).length;
+            const nNaver = (ev.naverNews || []).length;
+            const nGoog = (ev.googleNews || []).length;
+            const nMkt = (ev.googleNewsMarket || []).length;
+            const nBoard = (ev.boardPosts || []).length;
+            const newsTotal = nNaver + nGoog + nMkt;
+
+            let html = '<div class="result-card">';
+            html += '<div class="summary-block">' + nl2brEscaped(summary) + "</div>";
+
+            html += '<div class="indicator-bar">';
+            html += '<div class="quote-line">보조지표 · 시세 맥락</div>';
+            html += '<div>' + nl2brEscaped(ev.stockQuoteLine || "(시세 정보 없음)") + "</div>";
+            if (ev.boardSentimentHint) {
+                html += '<div class="sentiment"><strong>커뮤니티(종목토론) 참고</strong> — ' + escapeHtml(ev.boardSentimentHint) + "</div>";
+            }
+            html += '<div class="chips">';
+            html += '<span class="chip">DART 공시 ' + dDart + "건</span>";
+            html += '<span class="chip">주요 공시 ' + dMajor + "건</span>";
+            html += '<span class="chip">뉴스 참조 ' + newsTotal + "건</span>";
+            html += '<span class="chip">종목토론 ' + nBoard + "건</span>";
+            html += "</div></div>";
+
+            html += '<details class="evidence-panel">';
+            html += "<summary>참조한 공시 · 기사 · 종목토론 제목 보기</summary>";
+            html += '<div class="evidence-body">';
+
+            if (dDart > 0) {
+                html += '<div class="evidence-section"><h4>금일·최근 검색 공시 (DART)</h4><ul>';
+                (ev.dartDisclosures || []).forEach(function (r) {
+                    html += "<li>[" + escapeHtml(r.receiptDate || "") + "] " + escapeHtml(r.reportName || "") +
+                        ' <span class="muted">' + escapeHtml(r.receiptNo || "") + "</span></li>";
+                });
+                html += "</ul></div>";
+            }
+
+            if (dMajor > 0) {
+                html += '<div class="evidence-section"><h4>주요 경영사항 등 (DART)</h4><ul>';
+                (ev.dartMajorIssues || []).forEach(function (r) {
+                    html += "<li>[" + escapeHtml(r.receiptDate || "") + "] " + escapeHtml(r.reportName || "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+
+            const fin = ev.financialLines || [];
+            if (fin.length > 0) {
+                html += '<div class="evidence-section"><h4>재무 지표 (발췌)</h4><ul>';
+                fin.forEach(function (line) { html += "<li>" + escapeHtml(line) + "</li>"; });
+                html += "</ul></div>";
+            }
+
+            const own = ev.ownershipLines || [];
+            if (own.length > 0) {
+                html += '<div class="evidence-section"><h4>지분 공시 (발췌)</h4><ul>';
+                own.forEach(function (line) { html += "<li>" + escapeHtml(line) + "</li>"; });
+                html += "</ul></div>";
+            }
+
+            if (ev.disclosureDocumentSnippet && ev.disclosureDocumentSnippet.length > 0 && ev.disclosureDocumentSnippet !== "최신 원문 없음") {
+                html += '<div class="evidence-section"><h4>최신 공시 원문 일부</h4><div class="snippet-box">' +
+                    escapeHtml(ev.disclosureDocumentSnippet) + "</div></div>";
+            }
+
+            if (nNaver > 0) {
+                html += '<div class="evidence-section"><h4>네이버 뉴스</h4><ul>';
+                (ev.naverNews || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.link) {
+                        t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
+                    }
+                    let sub = "";
+                    if (r.publishedAt) sub += " <span class=\"muted\">" + escapeHtml(r.publishedAt) + "</span>";
+                    if (r.description) sub += "<br><span class=\"muted\">" + escapeHtml(r.description) + "</span>";
+                    html += "<li>" + t + sub + "</li>";
+                });
+                html += "</ul></div>";
+            }
+
+            if (nGoog > 0) {
+                html += '<div class="evidence-section"><h4>구글 뉴스 (종목 키워드)</h4><ul>';
+                (ev.googleNews || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.link) {
+                        t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
+                    }
+                    html += "<li>" + t + (r.publishedAt ? ' <span class="muted">' + escapeHtml(r.publishedAt) + "</span>" : "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+
+            if (nMkt > 0) {
+                html += '<div class="evidence-section"><h4>구글 뉴스 (시장 키워드)</h4><ul>';
+                (ev.googleNewsMarket || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.link) {
+                        t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
+                    }
+                    html += "<li>" + t + (r.publishedAt ? ' <span class="muted">' + escapeHtml(r.publishedAt) + "</span>" : "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+
+            if (nBoard > 0) {
+                html += '<div class="evidence-section"><h4>네이버 종목토론 (최신 글 제목)</h4><ul>';
+                (ev.boardPosts || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.url) {
+                        t = '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
+                    }
+                    html += "<li>[" + escapeHtml(r.postedAt || "") + "] " + t +
+                        ' <span class="muted">추천 ' + (r.upvotes != null ? r.upvotes : 0) +
+                        " · 비추천 " + (r.downvotes != null ? r.downvotes : 0) +
+                        (r.author ? " · " + escapeHtml(r.author) : "") + "</span></li>";
+                });
+                html += "</ul></div>";
+            }
+
+            html += '<p class="muted" style="margin-top:12px;margin-bottom:0;">위 목록은 AI 요약에 입력으로 사용된 자료입니다. 투자 판단의 근거로 삼지 마시고 원문을 확인하세요.</p>';
+            html += "</div></details>";
+            html += "</div>";
+            return html;
+        }
+
         document.addEventListener("DOMContentLoaded", async () => {
             const input = document.getElementById("searchInput");
             const list = document.getElementById("autoCompleteList");
@@ -51,7 +253,7 @@
             };
             const todayStr = getTodayStr();
             const cachedDate = localStorage.getItem("stocks_cache_date");
-            
+
             if (cachedDate !== todayStr) {
                 try {
                     const response = await fetch("/api/stocks/all");
@@ -68,47 +270,46 @@
             input.addEventListener("input", function() {
                 const val = this.value.trim();
                 list.innerHTML = "";
-                
+
                 if (!val) return;
 
-                const filteredStocks = stocksData.filter(stock => 
+                const filteredStocks = stocksData.filter(stock =>
                     stock.corpName.includes(val) || stock.corpCode.includes(val)
                 ).slice(0, 10);
 
                 filteredStocks.forEach(stock => {
                     const li = document.createElement("li");
-                    // ⭐️ 시장(코스피/코스닥) 뱃지를 함께 표시해 줍니다.
                     li.innerHTML = `<div><span class="stock-code">${stock.corpCode}</span> <strong>${stock.corpName}</strong></div> <span class="stock-market">${stock.market}</span>`;
-                    
+
                     li.addEventListener("click", async () => {
                         input.value = stock.corpName;
-                        list.innerHTML = ""; // 리스트 닫기
-                        
-                        // ⭐️ 화면 전환 없이 비동기(Fetch) 통신 시작
+                        list.innerHTML = "";
+
                         resultContainer.style.display = "none";
                         loading.style.display = "block";
-                        
+
                         try {
                             const url = `/ai/tutorial?corp_code=${stock.corpCode}&corp_name=${encodeURIComponent(stock.corpName)}&market=${encodeURIComponent(stock.market)}`;
-                            const response = await fetch(url);
-                            
-                            if (!response.ok) throw new Error("분석 데이터를 가져오지 못했습니다.");
-                            
-                            const text = await response.text();
-                            
-                            // 텍스트의 줄바꿈을 HTML <br> 태그로 변환하여 출력
-                            resultContainer.innerHTML = text.replace(/\n/g, '<br>');
+                            const response = await fetch(url, { headers: { Accept: "application/json" } });
+
+                            const data = await response.json();
+                            if (!response.ok) {
+                                const errMsg = data.error || "분석 데이터를 가져오지 못했습니다.";
+                                resultContainer.innerHTML = '<div class="result-card"><span style="color:red;">' + escapeHtml(errMsg) + "</span></div>";
+                                resultContainer.style.display = "block";
+                                return;
+                            }
+
+                            resultContainer.innerHTML = renderTutorialPayload(data);
                             resultContainer.style.display = "block";
-                            
                         } catch (error) {
-                            resultContainer.innerHTML = "<span style='color:red;'>오류: DART 공시나 시세를 가져오는데 실패했습니다. 비상장 종목인지 확인해 주세요.</span>";
+                            resultContainer.innerHTML = '<div class="result-card"><span style="color:red;">오류: 서버와 통신에 실패했거나 응답을 해석할 수 없습니다.</span></div>';
                             resultContainer.style.display = "block";
                         } finally {
-                            // 통신이 끝나면 로딩 스피너 숨기기
                             loading.style.display = "none";
                         }
                     });
-                    
+
                     list.appendChild(li);
                 });
             });

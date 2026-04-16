@@ -56,7 +56,7 @@
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `/api/stocks/all` | 종목 목록(JSON) |
-| GET | `/ai/tutorial` | `corp_code`, `corp_name`, `market` 쿼리 — AI 설명(plain text) |
+| GET | `/ai/tutorial` | `corp_code`, `corp_name`, `market` 쿼리 — JSON: `summary`(LLM 본문), `evidence`(참조 공시·뉴스·종목토론 등) |
 
 ## 문서
 
