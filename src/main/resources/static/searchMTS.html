@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>종목 상세 (MTS 시연) — AIS</title>
+    <style>
+        :root {
+            --bg-page: #e8eaed;
+            --bg-card: #ffffff;
+            --text: #1a1a1a;
+            --text-sub: #6b7280;
+            --border: #e5e7eb;
+            --blue-mts: #1e6eeb;
+            --red-mts: #e84235;
+            --tab-active: #111827;
+            --nav-active-bg: #fff3cd;
+            --header-h: 52px;
+            --bottom-trade: 56px;
+            --bottom-nav: 56px;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+            background: var(--bg-page);
+            color: var(--text);
+            font-size: 15px;
+            line-height: 1.45;
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
+
+        /* 시연: 최상단 — 종목토론 스크랩 여부 (검색·상세 공통) */
+        .global-board-bar {
+            max-width: 420px;
+            margin: 0 auto;
+            padding: 10px 12px;
+            background: #ffffff;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 300;
+            box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+        }
+        .global-board-bar label {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            color: #374151;
+            margin: 0;
+        }
+        .global-board-bar input[type="checkbox"] {
+            margin-top: 2px;
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            accent-color: var(--blue-mts);
+        }
+        .global-board-bar .hint {
+            display: block;
+            font-size: 0.72rem;
+            color: var(--text-sub);
+            margin-top: 4px;
+            font-weight: 400;
+        }
+
+        .demo-banner {
+            background: #1e3a5f;
+            color: #e2e8f0;
+            text-align: center;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .phone-wrap {
+            max-width: 420px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background: var(--bg-page);
+            position: relative;
+            box-shadow: 0 0 24px rgba(0,0,0,0.12);
+        }
+
+        /* —— 검색 진입 —— */
+        #screen-search {
+            padding: 16px 14px 120px;
+        }
+        #screen-search h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin: 8px 0 6px;
+            color: var(--text);
+        }
+        #screen-search .lead {
+            color: var(--text-sub);
+            font-size: 0.88rem;
+            margin-bottom: 14px;
+        }
+        .search-box-wrap { position: relative; margin-bottom: 12px; }
+        .search-box-wrap input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-card);
+        }
+        .autocomplete-list {
+            position: absolute;
+            top: 100%;
+            left: 0; right: 0;
+            margin: 4px 0 0;
+            padding: 0;
+            list-style: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            max-height: 280px;
+            overflow-y: auto;
+            z-index: 50;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+        }
+        .autocomplete-list li {
+            padding: 12px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #f3f4f6;
+            cursor: pointer;
+        }
+        .autocomplete-list li:active { background: #f9fafb; }
+        .stock-code { color: var(--text-sub); font-size: 0.85rem; margin-right: 6px; }
+        .stock-market {
+            font-size: 0.72rem;
+            color: #fff;
+            background: #0d9488;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            max-width: 420px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.88);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+            font-weight: 600;
+            color: var(--blue-mts);
+        }
+        #loading-overlay.on { display: flex; }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid #e5e7eb;
+            border-top-color: var(--blue-mts);
+            border-radius: 50%;
+            animation: spin 0.85s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* —— MTS 상세 —— */
+        #screen-detail { display: none; flex-direction: column; min-height: 100vh; padding-bottom: calc(var(--bottom-trade) + var(--bottom-nav) + 12px); }
+        #screen-detail.on { display: flex; }
+
+        .mts-top-meta {
+            padding: 6px 14px 0;
+            font-size: 11px;
+            color: var(--text-sub);
+            letter-spacing: -0.02em;
+        }
+
+        .mts-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px 8px 6px;
+            min-height: var(--header-h);
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+        }
+        .mts-header-left { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+        .btn-icon {
+            width: 40px; height: 40px;
+            border: none; background: transparent;
+            font-size: 20px;
+            color: #374151;
+            cursor: pointer;
+            border-radius: 8px;
+        }
+        .btn-icon:active { background: #f3f4f6; }
+        .mts-title-block { min-width: 0; }
+        .mts-title-block .name { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mts-header-right { display: flex; gap: 2px; }
+
+        .mts-price-row {
+            background: var(--bg-card);
+            padding: 10px 14px 14px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+        }
+        .mts-price-main { flex: 1; }
+        .mts-price-num {
+            font-size: 1.75rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            color: var(--text-sub);
+        }
+        .mts-price-num.has-down { color: var(--blue-mts); }
+        .mts-price-num.has-up { color: var(--red-mts); }
+        .mts-volume { font-size: 0.8rem; color: var(--text-sub); margin-top: 2px; }
+        .mts-change-line { font-size: 0.9rem; margin-top: 4px; color: var(--text-sub); }
+        .mts-change-line.down { color: var(--blue-mts); }
+        .mts-change-line.up { color: var(--red-mts); }
+        .mts-spark {
+            width: 72px; height: 44px;
+            background: linear-gradient(180deg, #fee2e2 0%, #dbeafe 100%);
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+            flex-shrink: 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .mts-spark::after {
+            content: "";
+            position: absolute;
+            left: 6px; right: 6px; bottom: 8px; height: 2px;
+            background: linear-gradient(90deg, var(--red-mts), var(--blue-mts));
+            border-radius: 1px;
+            opacity: 0.7;
+        }
+
+        .mts-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            color: var(--text-sub);
+        }
+        .mts-toolbar .pill {
+            border: 1px solid var(--border);
+            padding: 5px 10px;
+            border-radius: 6px;
+            background: #f9fafb;
+        }
+
+        .mts-tabs {
+            display: flex;
+            gap: 0;
+            overflow-x: auto;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .mts-tabs::-webkit-scrollbar { display: none; }
+        .mts-tab {
+            flex: 0 0 auto;
+            padding: 12px 14px;
+            font-size: 0.88rem;
+            color: var(--text-sub);
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            white-space: nowrap;
+            position: relative;
+        }
+        .mts-tab.active {
+            color: var(--tab-active);
+            font-weight: 700;
+        }
+        .mts-tab.active::after {
+            content: "";
+            position: absolute;
+            left: 10px; right: 10px; bottom: 0;
+            height: 2px;
+            background: var(--tab-active);
+            border-radius: 1px;
+        }
+
+        .mts-panel { display: none; padding: 0 0 16px; }
+        .mts-panel.active { display: block; }
+
+        .mts-card {
+            margin: 10px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .mts-card-h {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #374151;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .mts-card-body { padding: 12px 14px; font-size: 0.88rem; color: #4b5563; }
+
+        .ai-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: #eef2ff;
+            color: #4338ca;
+            margin-bottom: 8px;
+        }
+        .ai-summary { font-size: 0.92rem; line-height: 1.65; color: #1f2937; }
+
+        .chips-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 12px;
+        }
+        .chip {
+            font-size: 0.72rem;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: #f3f4f6;
+            color: #4b5563;
+            border: 1px solid #e5e7eb;
+        }
+
+        .chart-placeholder {
+            height: 160px;
+            margin: 10px 12px;
+            background: linear-gradient(180deg, #fff 0%, #f9fafb 100%);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-sub);
+            font-size: 0.8rem;
+        }
+
+        .info-subtabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            margin: 0 12px;
+            background: var(--bg-card);
+            border-radius: 10px 10px 0 0;
+            border: 1px solid var(--border);
+            border-bottom: none;
+        }
+        .info-subtab {
+            flex: 1;
+            padding: 11px;
+            text-align: center;
+            font-size: 0.85rem;
+            border: none;
+            background: transparent;
+            color: var(--text-sub);
+            cursor: pointer;
+        }
+        .info-subtab.active { font-weight: 700; color: var(--tab-active); background: #fafafa; }
+
+        .fn-guide-row {
+            display: flex;
+            justify-content: flex-end;
+            padding: 6px 14px 0;
+            font-size: 0.75rem;
+            color: var(--text-sub);
+        }
+
+        details.mts-details {
+            margin: 10px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+        details.mts-details > summary {
+            list-style: none;
+            padding: 14px;
+            font-weight: 700;
+            font-size: 0.88rem;
+            cursor: pointer;
+            color: var(--blue-mts);
+        }
+        details.mts-details > summary::-webkit-details-marker { display: none; }
+        .evidence-inner { padding: 0 14px 14px; max-height: 55vh; overflow-y: auto; }
+        .evidence-section { margin-top: 12px; }
+        .evidence-section h4 { margin: 0 0 6px; font-size: 0.78rem; color: #6b7280; font-weight: 600; }
+        .evidence-section ul { margin: 0; padding-left: 1rem; font-size: 0.82rem; }
+        .evidence-section li { margin-bottom: 6px; word-break: break-word; }
+        .evidence-section a { color: var(--blue-mts); }
+        .snippet-box {
+            font-size: 0.78rem;
+            background: #f9fafb;
+            border: 1px solid #eee;
+            padding: 8px;
+            border-radius: 6px;
+            max-height: 100px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .muted { color: #9ca3af; font-size: 0.75rem; }
+
+        .cache-toast {
+            margin: 8px 12px 0;
+            padding: 8px 10px;
+            font-size: 0.75rem;
+            color: #6b7280;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 8px;
+        }
+
+        /* 하단 매매 */
+        .mts-trade-bar {
+            position: fixed;
+            bottom: var(--bottom-nav);
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 420px;
+            height: var(--bottom-trade);
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+            padding: 8px 10px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            z-index: 100;
+        }
+        .mts-trade-bar .bolt {
+            width: 44px;
+            flex-shrink: 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #fff;
+            font-size: 1.1rem;
+        }
+        .mts-trade-bar .sell {
+            flex: 1;
+            border: none;
+            border-radius: 8px;
+            background: var(--blue-mts);
+            color: #fff;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+        .mts-trade-bar .buy {
+            flex: 1;
+            border: none;
+            border-radius: 8px;
+            background: var(--red-mts);
+            color: #fff;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        /* 글로벌 내비 */
+        .mts-nav {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 420px;
+            height: var(--bottom-nav);
+            display: flex;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
+        .mts-nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            color: var(--text-sub);
+            border: none;
+            background: transparent;
+            cursor: default;
+            gap: 2px;
+        }
+        .mts-nav-item.active { color: #111; font-weight: 700; }
+        .mts-nav-item.active .nav-ico { background: var(--nav-active-bg); }
+        .nav-ico {
+            width: 28px; height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .financial-mock {
+            margin: 0 12px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0 0 10px 10px;
+            border-top: none;
+            overflow: hidden;
+        }
+        .financial-mock .row {
+            display: grid;
+            grid-template-columns: 1fr repeat(3, minmax(0, 1fr));
+            font-size: 0.72rem;
+            border-top: 1px solid #f3f4f6;
+        }
+        .financial-mock .row.head { background: #f9fafb; font-weight: 700; color: #374151; }
+        .financial-mock .cell { padding: 8px 6px; text-align: right; color: #4b5563; }
+        .financial-mock .cell.label { text-align: left; color: #6b7280; font-weight: 600; }
+        .financial-mock .est { background: #ecfdf5; }
+    </style>
+</head>
+<body>
+    <div class="global-board-bar" id="globalBoardBar">
+        <label for="naverBoardToggle">
+            <input type="checkbox" id="naverBoardToggle" checked>
+            <span>
+                <strong>네이버 종목토론</strong> 스크랩 · AI 반영
+                <span class="hint">켜면 토론방을 수집해 분석에 포함합니다. 끄면 스크랩하지 않으며 다음 종목 선택 시 적용됩니다.</span>
+            </span>
+        </label>
+    </div>
+    <div class="demo-banner">시연용 UI · 실제 MTS·체결과 무관 · 데이터는 AIS <code>/ai/tutorial</code> 응답입니다</div>
+    <div class="phone-wrap">
+        <div id="loading-overlay"><div class="spinner"></div><span>AI 분석 중…</span></div>
+
+        <section id="screen-search">
+            <h1>종목 검색</h1>
+            <p class="lead">검색 후 한화 MTS와 유사한 상세 화면에서 API 기반 AI 요약·근거를 확인합니다. 최종 노출 위치는 기획 확정 후 조정 예정입니다.</p>
+            <div class="search-box-wrap">
+                <input type="text" id="searchInput" placeholder="종목명 또는 코드 (예: LG, 032640)" autocomplete="off">
+                <ul id="autoCompleteList" class="autocomplete-list"></ul>
+            </div>
+        </section>
+
+        <section id="screen-detail" aria-hidden="true">
+            <div class="mts-top-meta" id="mtsTopMeta"></div>
+            <header class="mts-header">
+                <div class="mts-header-left">
+                    <button type="button" class="btn-icon" id="btnBack" aria-label="뒤로">←</button>
+                    <div class="mts-title-block">
+                        <div class="name" id="mtsStockName">—</div>
+                    </div>
+                    <button type="button" class="btn-icon" aria-label="검색">⌕</button>
+                </div>
+                <div class="mts-header-right">
+                    <button type="button" class="btn-icon" aria-label="관심">☆</button>
+                    <button type="button" class="btn-icon" aria-label="메뉴">⋮</button>
+                </div>
+            </header>
+
+            <div class="mts-price-row">
+                <div class="mts-price-main">
+                    <div class="mts-price-num" id="mtsPriceMain">—</div>
+                    <div class="mts-volume" id="mtsVolumeLine"></div>
+                    <div class="mts-change-line" id="mtsChangeLine">시연 · 등락·현재가는 API에서 제외된 맥락입니다</div>
+                </div>
+                <div class="mts-spark" aria-hidden="true"></div>
+            </div>
+
+            <div class="mts-toolbar">
+                <span class="pill">통합 ▾</span>
+                <span>당일 · 시연</span>
+            </div>
+
+            <nav class="mts-tabs" role="tablist" aria-label="종목 상단 탭">
+                <button type="button" class="mts-tab" data-panel="panel-home">종목홈</button>
+                <button type="button" class="mts-tab" data-panel="panel-info">종목정보</button>
+                <button type="button" class="mts-tab active" data-panel="panel-ai">AI WHY</button>
+                <button type="button" class="mts-tab" data-panel="panel-news">뉴스</button>
+                <button type="button" class="mts-tab" data-panel="panel-more">+</button>
+            </nav>
+
+            <div id="panel-home" class="mts-panel">
+                <div class="chart-placeholder">차트 영역 (시연 · 실데이터 미연동)</div>
+                <div class="mts-card">
+                    <div class="mts-card-h"><span>오늘의 맥락 (API)</span></div>
+                    <div class="mts-card-body" id="homeAiTeaser"></div>
+                </div>
+                <div class="mts-card">
+                    <div class="mts-card-h"><span>참고 지표</span></div>
+                    <div class="mts-card-body" id="homeChips"></div>
+                </div>
+            </div>
+
+            <div id="panel-info" class="mts-panel">
+                <div class="fn-guide-row">에프앤가이드 ↗ <span class="muted" style="margin-left:8px;">시연용 표시</span></div>
+                <div class="info-subtabs">
+                    <button type="button" class="info-subtab active" data-infopanel="info-fin">재무정보</button>
+                    <button type="button" class="info-subtab" data-infopanel="info-corp">기업정보</button>
+                </div>
+                <div id="info-fin-wrap">
+                <div class="financial-mock">
+                    <div class="row head">
+                        <div class="cell label">구분</div>
+                        <div class="cell">2024.12</div>
+                        <div class="cell">2025.12</div>
+                        <div class="cell est">2026.12</div>
+                    </div>
+                    <div class="row"><div class="cell label">매출액</div><div class="cell">—</div><div class="cell">—</div><div class="cell est">—</div></div>
+                    <div class="row"><div class="cell label">영업이익</div><div class="cell">—</div><div class="cell">—</div><div class="cell est">—</div></div>
+                </div>
+                <p class="muted" style="margin:8px 12px 0;font-size:0.75rem;">표는 시연용 플레이스홀더입니다. 실제 재무표는 MTS·FnGuide 연동 시 표시하고, DART 재무 발췌는 아래 카드에 API로 반영됩니다.</p>
+                </div>
+                <div id="info-corp" class="mts-card" style="display:none;">
+                    <div class="mts-card-body muted">기업 개요·AI 요약은 기획 확정 후 배치합니다.</div>
+                </div>
+                <div class="mts-card" style="margin-top:12px;">
+                    <div class="mts-card-h"><span>DART 재무·지분 (API 발췌)</span></div>
+                    <div class="mts-card-body" id="infoDartSnippet"></div>
+                </div>
+            </div>
+
+            <div id="panel-ai" class="mts-panel active">
+                <div id="mtsCacheToast" class="cache-toast" style="display:none;"></div>
+                <div class="mts-card">
+                    <div class="mts-card-h"><span>AI 분석 요약</span><span class="muted" style="font-weight:400;">OpenAI</span></div>
+                    <div class="mts-card-body">
+                        <span class="ai-badge">WHY Approach</span>
+                        <div class="ai-summary" id="mtsAiSummary"></div>
+                    </div>
+                </div>
+                <div class="mts-card">
+                    <div class="mts-card-h"><span>참고 지표 · 반영 건수</span></div>
+                    <div class="mts-card-body"><div class="chips-row" id="mtsChips"></div></div>
+                </div>
+                <details class="mts-details" id="mtsEvidenceDetails">
+                    <summary>참조 공시 · 뉴스 · 리서치 · 토론</summary>
+                    <div class="evidence-inner" id="mtsEvidenceBody"></div>
+                </details>
+            </div>
+
+            <div id="panel-news" class="mts-panel">
+                <div class="mts-card">
+                    <div class="mts-card-h">종목·시장 뉴스 (API)</div>
+                    <div class="mts-card-body" id="mtsNewsOnly"></div>
+                </div>
+            </div>
+
+            <div id="panel-more" class="mts-panel">
+                <div class="mts-card"><div class="mts-card-body muted">추가 탭은 기획 후 연결합니다.</div></div>
+            </div>
+        </section>
+
+        <div class="mts-trade-bar" id="mtsTradeBar" style="display:none;">
+            <button type="button" class="bolt" aria-label="퀵">⚡</button>
+            <button type="button" class="sell">매도</button>
+            <button type="button" class="buy">매수</button>
+        </div>
+        <nav class="mts-nav" id="mtsNav" style="display:none;" aria-label="하단 메뉴">
+            <div class="mts-nav-item"><span class="nav-ico">⌂</span>홈</div>
+            <div class="mts-nav-item"><span class="nav-ico">♡</span>관심</div>
+            <div class="mts-nav-item active"><span class="nav-ico">▣</span>현재가</div>
+            <div class="mts-nav-item"><span class="nav-ico">▤</span>잔고</div>
+            <div class="mts-nav-item"><span class="nav-ico">☰</span>주문</div>
+            <div class="mts-nav-item"><span class="nav-ico">⚡</span>퀵메뉴</div>
+            <div class="mts-nav-item"><span class="nav-ico">≡</span>전체</div>
+        </nav>
+    </div>
+
+    <script>
+        function escapeHtml(text) {
+            if (text == null || text === undefined) return "";
+            const div = document.createElement("div");
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+        function nl2brEscaped(text) {
+            return escapeHtml(text).replace(/\n/g, "<br>");
+        }
+
+        function buildEvidenceHtml(ev) {
+            const km = ev.kisMarketMetrics || {};
+            let html = "";
+            if (km.per || km.pbr || km.rsi || km.contractStrength || km.llmContextBlock) {
+                html += '<div class="evidence-section"><h4>한국투자증권 — 시세·지표</h4><ul>';
+                function mrow(label, val) {
+                    if (val) html += "<li><strong>" + escapeHtml(label) + "</strong> " + escapeHtml(val) + "</li>";
+                }
+                mrow("PER", km.per);
+                mrow("PBR", km.pbr);
+                mrow("RSI", km.rsi);
+                mrow("체결강도", km.contractStrength);
+                if (km.llmContextBlock) html += "<li class=\"muted\">" + nl2brEscaped(km.llmContextBlock) + "</li>";
+                html += "</ul></div>";
+            }
+            const dDart = (ev.dartDisclosures || []).length;
+            if (dDart > 0) {
+                html += '<div class="evidence-section"><h4>DART 공시</h4><ul>';
+                (ev.dartDisclosures || []).forEach(function (r) {
+                    html += "<li>[" + escapeHtml(r.receiptDate || "") + "] " + escapeHtml(r.reportName || "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+            if ((ev.dartMajorIssues || []).length > 0) {
+                html += '<div class="evidence-section"><h4>주요 공시</h4><ul>';
+                (ev.dartMajorIssues || []).forEach(function (r) {
+                    html += "<li>[" + escapeHtml(r.receiptDate || "") + "] " + escapeHtml(r.reportName || "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+            if ((ev.financialLines || []).length > 0) {
+                html += '<div class="evidence-section"><h4>재무 발췌</h4><ul>';
+                (ev.financialLines || []).forEach(function (line) { html += "<li>" + escapeHtml(line) + "</li>"; });
+                html += "</ul></div>";
+            }
+            if ((ev.ownershipLines || []).length > 0) {
+                html += '<div class="evidence-section"><h4>지분 발췌</h4><ul>';
+                (ev.ownershipLines || []).forEach(function (line) { html += "<li>" + escapeHtml(line) + "</li>"; });
+                html += "</ul></div>";
+            }
+            if (ev.disclosureDocumentSnippet && ev.disclosureDocumentSnippet !== "최신 원문 없음") {
+                html += '<div class="evidence-section"><h4>공시 원문 일부</h4><div class="snippet-box">' + escapeHtml(ev.disclosureDocumentSnippet) + "</div></div>";
+            }
+            function newsList(title, items, linkKey, titleKey, dateKey, descKey) {
+                if (!items || !items.length) return;
+                html += '<div class="evidence-section"><h4>' + escapeHtml(title) + "</h4><ul>";
+                items.forEach(function (r) {
+                    let t = escapeHtml(r[titleKey] || "");
+                    const lk = r[linkKey];
+                    if (lk) t = '<a href="' + escapeHtml(lk) + '" target="_blank" rel="noopener">' + t + "</a>";
+                    let sub = r[dateKey] ? ' <span class="muted">' + escapeHtml(r[dateKey]) + "</span>" : "";
+                    if (descKey && r[descKey]) sub += '<br><span class="muted">' + escapeHtml(r[descKey]) + "</span>";
+                    html += "<li>" + t + sub + "</li>";
+                });
+                html += "</ul></div>";
+            }
+            newsList("네이버 뉴스(종목)", ev.naverNews || [], "link", "title", "publishedAt", "description");
+            newsList("구글 뉴스(종목)", ev.googleNews || [], "link", "title", "publishedAt", null);
+            newsList("네이버 뉴스(시장)", ev.naverNewsMarket || [], "link", "title", "publishedAt", "description");
+            newsList("구글 뉴스(시장)", ev.googleNewsMarket || [], "link", "title", "publishedAt", null);
+            if ((ev.hanwhaResearch || []).length > 0) {
+                html += '<div class="evidence-section"><h4>한화 WM 리서치(종목 매칭)</h4><ul>';
+                (ev.hanwhaResearch || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.link) t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener">' + t + "</a>";
+                    html += "<li>" + t + (r.snippet ? '<br><span class="muted">' + escapeHtml(r.snippet) + "</span>" : "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+            if ((ev.boardPosts || []).length > 0) {
+                html += '<div class="evidence-section"><h4>네이버 종목토론</h4><ul>';
+                (ev.boardPosts || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.url) t = '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">' + t + "</a>";
+                    html += "<li>[" + escapeHtml(r.postedAt || "") + "] " + t + "</li>";
+                });
+                html += "</ul></div>";
+            }
+            html += '<p class="muted" style="margin-top:10px;">투자 권유가 아닙니다. 원문을 확인하세요.</p>';
+            return html || "<p class=\"muted\">근거 항목이 없습니다.</p>";
+        }
+
+        function buildNewsCompact(ev) {
+            let blocks = [];
+            function block(title, items) {
+                if (!items || !items.length) return;
+                let h = "<strong>" + escapeHtml(title) + "</strong><ul style='margin:6px 0 0;padding-left:1rem;font-size:0.82rem;'>";
+                items.slice(0, 5).forEach(function (r) {
+                    const t = r.title || "";
+                    const lk = r.link || r.url;
+                    const line = lk
+                        ? '<a href="' + escapeHtml(lk) + '" target="_blank" rel="noopener">' + escapeHtml(t) + "</a>"
+                        : escapeHtml(t);
+                    h += "<li style='margin-bottom:4px;'>" + line + "</li>";
+                });
+                h += "</ul>";
+                blocks.push(h);
+            }
+            block("종목 키워드 — 네이버", ev.naverNews);
+            block("종목 키워드 — 구글", ev.googleNews);
+            block("시장 키워드 — 네이버", ev.naverNewsMarket);
+            block("시장 키워드 — 구글", ev.googleNewsMarket);
+            return blocks.length ? blocks.join("<div style='height:10px'></div>") : "<span class=\"muted\">뉴스 데이터 없음</span>";
+        }
+
+        function buildChipsHtml(ev) {
+            const dDart = (ev.dartDisclosures || []).length;
+            const dMajor = (ev.dartMajorIssues || []).length;
+            const nNaver = (ev.naverNews || []).length;
+            const nGoog = (ev.googleNews || []).length;
+            const nNaverMkt = (ev.naverNewsMarket || []).length;
+            const nMkt = (ev.googleNewsMarket || []).length;
+            const nHanwha = (ev.hanwhaResearch || []).length;
+            const nBoard = (ev.boardPosts || []).length;
+            const newsTotal = nNaver + nGoog + nNaverMkt + nMkt;
+            const km = ev.kisMarketMetrics || {};
+            let h = "";
+            if (km.per) h += "<span class=\"chip\">PER " + escapeHtml(km.per) + "</span>";
+            if (km.pbr) h += "<span class=\"chip\">PBR " + escapeHtml(km.pbr) + "</span>";
+            if (km.rsi) h += "<span class=\"chip\">RSI " + escapeHtml(km.rsi) + "</span>";
+            if (km.contractStrength) h += "<span class=\"chip\">체결 " + escapeHtml(km.contractStrength) + "</span>";
+            h += "<span class=\"chip\">공시 " + dDart + "</span>";
+            h += "<span class=\"chip\">주요 " + dMajor + "</span>";
+            h += "<span class=\"chip\">뉴스 " + newsTotal + "</span>";
+            h += "<span class=\"chip\">한화 " + nHanwha + "</span>";
+            h += "<span class=\"chip\">토론 " + nBoard + "</span>";
+            return h || "<span class=\"muted\">지표 없음</span>";
+        }
+
+        function fillDartInfoPanel(ev) {
+            const el = document.getElementById("infoDartSnippet");
+            const fin = (ev.financialLines || []).slice(0, 6).map(function (l) { return "<li>" + escapeHtml(l) + "</li>"; }).join("");
+            const own = (ev.ownershipLines || []).slice(0, 4).map(function (l) { return "<li>" + escapeHtml(l) + "</li>"; }).join("");
+            let html = "";
+            if (fin) html += "<div style='margin-bottom:10px;'><strong>재무</strong><ul style='margin:4px 0 0;padding-left:1rem;font-size:0.82rem;'>" + fin + "</ul></div>";
+            if (own) html += "<div><strong>지분</strong><ul style='margin:4px 0 0;padding-left:1rem;font-size:0.82rem;'>" + own + "</ul></div>";
+            el.innerHTML = html || "<span class=\"muted\">DART 발췌 없음</span>";
+        }
+
+        function applyTutorialToMts(stock, data, cacheNote) {
+            const ev = data.evidence || {};
+            document.getElementById("mtsStockName").textContent = stock.corpName;
+            document.getElementById("mtsTopMeta").textContent =
+                stock.corpCode + " | " + (stock.market || "—") + " | 시연";
+
+            const priceEl = document.getElementById("mtsPriceMain");
+            priceEl.textContent = "시세 연동 전";
+            priceEl.className = "mts-price-num";
+            document.getElementById("mtsVolumeLine").textContent = ev.stockQuoteLine || "거래량 등은 API 요약 문구로 제공됩니다.";
+            document.getElementById("mtsChangeLine").textContent = "등락률·현재가는 분석 입력에서 제외된 정책과 동일하게 표시하지 않습니다.";
+            document.getElementById("mtsChangeLine").className = "mts-change-line";
+
+            const summary = data.summary || "";
+            document.getElementById("mtsAiSummary").innerHTML = nl2brEscaped(summary);
+            document.getElementById("homeAiTeaser").innerHTML = nl2brEscaped(summary.length > 220 ? summary.slice(0, 220) + "…" : summary);
+
+            const chips = buildChipsHtml(ev);
+            document.getElementById("mtsChips").innerHTML = chips;
+            document.getElementById("homeChips").innerHTML = chips;
+
+            document.getElementById("mtsEvidenceBody").innerHTML = buildEvidenceHtml(ev);
+            document.getElementById("mtsNewsOnly").innerHTML = buildNewsCompact(ev);
+            fillDartInfoPanel(ev);
+
+            const toast = document.getElementById("mtsCacheToast");
+            if (cacheNote) {
+                toast.style.display = "block";
+                toast.textContent = cacheNote;
+            } else {
+                toast.style.display = "none";
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const input = document.getElementById("searchInput");
+            const list = document.getElementById("autoCompleteList");
+            const screenSearch = document.getElementById("screen-search");
+            const screenDetail = document.getElementById("screen-detail");
+            const loading = document.getElementById("loading-overlay");
+            const naverBoardToggle = document.getElementById("naverBoardToggle");
+            const LS_NAVER_BOARD = "ais_naver_board_enabled";
+            if (localStorage.getItem(LS_NAVER_BOARD) === "0") naverBoardToggle.checked = false;
+            naverBoardToggle.addEventListener("change", function () {
+                localStorage.setItem(LS_NAVER_BOARD, naverBoardToggle.checked ? "1" : "0");
+            });
+
+            let stocksData = [];
+            const getTodayStr = function () {
+                const now = new Date();
+                return now.getFullYear() + String(now.getMonth() + 1).padStart(2, "0") + String(now.getDate()).padStart(2, "0");
+            };
+            const todayStr = getTodayStr();
+            const cachedDate = localStorage.getItem("stocks_cache_date");
+
+            (async function loadStocks() {
+                if (cachedDate !== todayStr) {
+                    try {
+                        const response = await fetch("/api/stocks/all");
+                        stocksData = await response.json();
+                        localStorage.setItem("stocks_cache_data", JSON.stringify(stocksData));
+                        localStorage.setItem("stocks_cache_date", todayStr);
+                    } catch (e) { console.error(e); }
+                } else {
+                    try { stocksData = JSON.parse(localStorage.getItem("stocks_cache_data") || "[]"); } catch (e) { stocksData = []; }
+                }
+            })();
+
+            input.addEventListener("input", function () {
+                const val = this.value.trim();
+                list.innerHTML = "";
+                if (!val) return;
+                const filtered = stocksData.filter(function (s) {
+                    return s.corpName.includes(val) || s.corpCode.includes(val);
+                }).slice(0, 10);
+                filtered.forEach(function (stock) {
+                    const li = document.createElement("li");
+                    li.innerHTML = "<div><span class=\"stock-code\">" + stock.corpCode + "</span> <strong>" + escapeHtml(stock.corpName) + "</strong></div><span class=\"stock-market\">" + escapeHtml(stock.market || "") + "</span>";
+                    li.addEventListener("click", async function () {
+                        input.value = stock.corpName;
+                        list.innerHTML = "";
+                        loading.classList.add("on");
+                        try {
+                            const naverBoard = naverBoardToggle.checked;
+                            const url = "/ai/tutorial?corp_code=" + stock.corpCode + "&corp_name=" + encodeURIComponent(stock.corpName) + "&market=" + encodeURIComponent(stock.market || "") + "&naver_board=" + naverBoard;
+                            const response = await fetch(url, { headers: { Accept: "application/json" } });
+                            const data = await response.json();
+                            if (!response.ok) {
+                                alert(data.error || "분석을 불러오지 못했습니다.");
+                                return;
+                            }
+                            const cacheState = response.headers.get("X-AIS-Tutorial-Cache") || "";
+                            const cacheExp = response.headers.get("X-AIS-Tutorial-Cache-Expires") || "";
+                            let cacheNote = "";
+                            if (cacheState === "HIT") {
+                                cacheNote = "파일 캐시 HIT. 만료(UTC): " + cacheExp;
+                            } else if (cacheState === "MISS") {
+                                cacheNote = "신규 분석 MISS. 캐시 만료(UTC): " + cacheExp;
+                            }
+                            applyTutorialToMts(stock, data, cacheNote);
+                            screenSearch.style.display = "none";
+                            screenDetail.classList.add("on");
+                            screenDetail.setAttribute("aria-hidden", "false");
+                            document.getElementById("mtsTradeBar").style.display = "flex";
+                            document.getElementById("mtsNav").style.display = "flex";
+                        } catch (e) {
+                            alert("통신 오류");
+                        } finally {
+                            loading.classList.remove("on");
+                        }
+                    });
+                    list.appendChild(li);
+                });
+            });
+
+            document.addEventListener("click", function (e) {
+                if (e.target !== input) list.innerHTML = "";
+            });
+
+            document.getElementById("btnBack").addEventListener("click", function () {
+                screenDetail.classList.remove("on");
+                screenDetail.setAttribute("aria-hidden", "true");
+                screenSearch.style.display = "block";
+                document.getElementById("mtsTradeBar").style.display = "none";
+                document.getElementById("mtsNav").style.display = "none";
+                input.value = "";
+            });
+
+            document.querySelectorAll(".mts-tab").forEach(function (tab) {
+                tab.addEventListener("click", function () {
+                    const id = tab.getAttribute("data-panel");
+                    document.querySelectorAll(".mts-tab").forEach(function (t) { t.classList.remove("active"); });
+                    document.querySelectorAll(".mts-panel").forEach(function (p) { p.classList.remove("active"); });
+                    tab.classList.add("active");
+                    const panel = document.getElementById(id);
+                    if (panel) panel.classList.add("active");
+                });
+            });
+
+            document.querySelectorAll(".info-subtab").forEach(function (t) {
+                t.addEventListener("click", function () {
+                    document.querySelectorAll(".info-subtab").forEach(function (x) { x.classList.remove("active"); });
+                    t.classList.add("active");
+                    const id = t.getAttribute("data-infopanel");
+                    document.getElementById("info-fin-wrap").style.display = id === "info-fin" ? "block" : "none";
+                    document.getElementById("info-corp").style.display = id === "info-corp" ? "block" : "none";
+                });
+            });
+        });
+    </script>
+</body>
+</html>
