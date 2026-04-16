@@ -17,6 +17,8 @@ import com.example.demo.collect.dart.dto.OwnershipResponse;
 import com.example.demo.collect.kis.KisStockApiClient;
 import com.example.demo.collect.kis.KisTokenManager;
 import com.example.demo.collect.kis.dto.KisStockResponse;
+import com.example.demo.collect.naverboard.NaverStockBoardClient;
+import com.example.demo.collect.naverboard.dto.StockBoardPost;
 import com.example.demo.collect.news.GoogleNewsApiClient;
 import com.example.demo.collect.news.NaverNewsApiClient;
 import com.example.demo.collect.news.dto.NaverNewsResponse;
@@ -35,6 +37,7 @@ public class StockAiAnalysisService {
     private final KisStockApiClient kisStockApiClient;
     private final KisTokenManager kisTokenManager;
     private final OpenAiDirectClient openAiDirectClient;
+    private final NaverStockBoardClient naverStockBoardClient;
 
     public String generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
         log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작", corpName);
@@ -74,6 +77,11 @@ public class StockAiAnalysisService {
         
         List<String> googleNewsListMarket = googleNewsApiClient.searchNews(market, 3);
         String parsedGoogleNewsMarket = String.join("\n", googleNewsListMarket);
+
+        // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑)
+        List<StockBoardPost> boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
+        String parsedBoardPosts = formatNaverBoardPosts(boardPosts);
+        String boardSentimentHint = summarizeBoardSentiment(boardPosts);
         
         log.info("[한국투자증권] 주가정보 - " + parsedStockStatus);
         log.info("[DART] 공시정보 - " + parsedFinancials);
@@ -82,13 +90,15 @@ public class StockAiAnalysisService {
         log.info("[네이버API] 뉴스 - " + parsedNaverNews);
         log.info("[구글RSS] 뉴스 - " + parsedGoogleNews);
         log.info("[구글RSS] 뉴스 - " + parsedGoogleNewsMarket);
+        log.info("[네이버종목토론] 요약 - {}", boardSentimentHint);
 
-        // 4. WHY Approach 시스템 프롬프트 조립
+        // 5. WHY Approach 시스템 프롬프트 조립
         String systemPrompt = """
             당신은 주식 투자를 처음 시작하는 사람들에게 단기간 종목이 왜 움직였는지를 알려주는 가이드입니다.
             많은 사람들이 주식 가격이 왜 움직였는지 이해를 돕는 것이 우리의 가장 큰 목표입니다.
             사용자들은 지식의 편차가 심하므로, 전문 용어를 최대한 배제하고 쉽게 비유해서 설명해야 합니다.
             제공된 '현재 주가 상황'을 먼저 짚어주고, 공시와 뉴스를 바탕으로 그 주가가 왜 그렇게 움직이고 있는지 인과관계를 설명하세요.
+            네이버 종목토론방 글은 개인 의견·감정에 가깝고 추천/비추천 수도 참고용입니다. 여론을 사실처럼 단정하지 말고, '커뮤니티에서는 이런 분위기가 보인다' 수준으로 짧게 언급하세요.
             현재가는 민감한 정보이니 명시하지 않고 변동율만 노출해줘(인과관계 상 필요없다면 노출 안해도 되).
             사용자가 스스로 시장을 이해하고 당사 MTS에 계속 머물며 학습하고 싶도록 작성해 주세요.
             """;
@@ -111,11 +121,16 @@ public class StockAiAnalysisService {
             %s
             %s
             
+            [커뮤니티 반응 — 네이버 종목토론방 최신 글 5개]
+            7. 여론 요약(추천/비추천 합계 기반 참고): %s
+            %s
+            
             위 사실을 바탕으로:
             - 지금 이 종목의 현재 가격과 분위기는 어떤 상태인지?
             - 공시나 뉴스가 이 가격 움직임에 '왜' 영향을 주고 있는지?
-            를 3줄로 쉽게 설명해 줘.
-            """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary, parsedNaverNews, parsedGoogleNews, parsedGoogleNewsMarket);
+            - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
+            를 3~4줄로 쉽게 설명해 줘.
+            """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary, parsedNaverNews, parsedGoogleNews, parsedGoogleNewsMarket, boardSentimentHint, parsedBoardPosts);
 
         return openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
     }
@@ -171,6 +186,45 @@ public class StockAiAnalysisService {
             log.error("ZIP 원문 풀기 실패", e);
         }
         return "원문 파싱 실패";
+    }
+
+    private String formatNaverBoardPosts(List<StockBoardPost> posts) {
+        if (posts == null || posts.isEmpty()) {
+            return "- 종목토론방 목록을 가져오지 못했거나 게시글이 없습니다.";
+        }
+        return posts.stream()
+                .map(p -> String.format(
+                        "- [%s] %s (추천 %d / 비추천 %d, 조회 %d, 작성자 %s)",
+                        p.postedAt(),
+                        p.title(),
+                        p.upvotes(),
+                        p.downvotes(),
+                        p.views(),
+                        p.author()
+                ))
+                .collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * 추천·비추천 합계로 대략적인 톤만 잡아 LLM에 힌트로 넘깁니다 (정밀 감성분석 아님).
+     */
+    private String summarizeBoardSentiment(List<StockBoardPost> posts) {
+        if (posts == null || posts.isEmpty()) {
+            return "토론방 데이터 없음";
+        }
+        int up = posts.stream().mapToInt(StockBoardPost::upvotes).sum();
+        int down = posts.stream().mapToInt(StockBoardPost::downvotes).sum();
+        String tone;
+        if (up + down == 0) {
+            tone = "최근 글에서 추천·비추천이 거의 없어 여론 방향을 숫자로 보기 어렵습니다.";
+        } else if (up > down * 2) {
+            tone = "최근 글 기준으로 추천이 비추천보다 많아 다소 긍정적인 반응으로 보입니다.";
+        } else if (down > up * 2) {
+            tone = "비추천이 상대적으로 많아 다소 부정적인 반응이 섞여 있습니다.";
+        } else {
+            tone = "긍정과 부정 반응이 비슷하거나 혼재합니다.";
+        }
+        return String.format("%s (최근 %d개 글 기준 추천 합 %d, 비추천 합 %d)", tone, posts.size(), up, down);
     }
 
     private String extractNaverNews(NaverNewsResponse data) {
