@@ -18,10 +18,14 @@ import com.example.demo.collect.dart.dto.FinancialResponse;
 import com.example.demo.collect.dart.dto.OwnershipResponse;
 import com.example.demo.collect.kis.KisStockApiClient;
 import com.example.demo.collect.kis.KisTokenManager;
+import com.example.demo.collect.kis.dto.KisCcnlResponse;
+import com.example.demo.collect.kis.dto.KisInvestmentIndicatorResponse;
 import com.example.demo.collect.kis.dto.KisStockResponse;
+import com.example.demo.collect.kis.dto.KisStockResponse.Output;
 import com.example.demo.collect.naverboard.NaverStockBoardClient;
 import com.example.demo.collect.naverboard.dto.StockBoardPost;
 import com.example.demo.ai.dto.AiTutorialResponse;
+import com.example.demo.ai.dto.KisMarketMetrics;
 import com.example.demo.ai.dto.TutorialEvidence;
 import com.example.demo.ai.dto.TutorialEvidence.BoardRef;
 import com.example.demo.ai.dto.TutorialEvidence.DisclosureRef;
@@ -50,10 +54,13 @@ public class StockAiAnalysisService {
     public AiTutorialResponse generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
         log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작", corpName);
 
-        // 1. 시장 현재 상태 수집 (한국투자증권 실시간 시세 - 6자리 코드 사용)
-        String validAccessToken = kisTokenManager.getAccessToken(); 
+        // 1. 시장 현재 상태 수집 (한국투자증권 — 현재가·밸류에이션·52주 대비·RSI·체결강도 등)
+        String validAccessToken = kisTokenManager.getAccessToken();
         KisStockResponse stockData = kisStockApiClient.getCurrentPrice(stockCode, validAccessToken);
-        String parsedStockStatus = extractStockStatus(stockData);
+        KisInvestmentIndicatorResponse kisInvest = kisStockApiClient.getInvestmentIndicator(stockCode, validAccessToken);
+        KisCcnlResponse kisCcnl = kisStockApiClient.getTimeConclusion(stockCode, validAccessToken);
+        KisMarketMetrics kisMetrics = buildKisMarketMetrics(stockData, kisInvest, kisCcnl);
+        String parsedStockStatus = kisMetrics.llmContextBlock();
 
         // 2. 팩트 데이터 수집 (DART - 8자리 고유번호 사용)
         DisclosureResponse disclosureData = dartApiClient.searchDisclosures(dartCode, today, today, "1", "10");
@@ -114,6 +121,7 @@ public class StockAiAnalysisService {
             많은 사람들이 주식 가격이 왜 움직였는지 이해를 돕는 것이 우리의 가장 큰 목표입니다.
             사용자들은 지식의 편차가 심하므로, 전문 용어를 최대한 배제하고 쉽게 비유해서 설명해야 합니다.
             제공된 '현재 주가 상황'을 먼저 짚어주고, 공시와 뉴스를 바탕으로 그 주가가 왜 그렇게 움직이고 있는지 인과관계를 설명하세요.
+            PER·PBR·RSI·체결강도·52주 대비 등은 증권사 API가 준 참고 수치일 뿐이며, 투자의 정답이나 매수·매도 신호가 아님을 유의해 설명하세요.
             네이버 종목토론방 글은 개인 의견·감정에 가깝고 추천/비추천 수도 참고용입니다. 여론을 사실처럼 단정하지 말고, '커뮤니티에서는 이런 분위기가 보인다' 수준으로 짧게 언급하세요.
             현재가는 민감한 정보이니 명시하지 않고 변동율만 노출해줘(인과관계 상 필요없다면 노출 안해도 되).
             사용자가 스스로 시장을 이해하고 당사 MTS에 계속 머물며 학습하고 싶도록 작성해 주세요.
@@ -122,8 +130,8 @@ public class StockAiAnalysisService {
         String userPrompt = String.format("""
             다음은 특정 기업의 실시간 데이터입니다.
             
-            [현재 시장 상황]
-            1. 실시간 시세: %s
+            [현재 시장 상황 — 한국투자증권 시세·지표]
+            1. 실시간 시세 및 참고 지표(PER, RSI, 체결강도 등): %s
             
             [핵심 팩트 데이터]
             2. 발생한 공시: %s
@@ -150,7 +158,8 @@ public class StockAiAnalysisService {
 
         String summary = openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
         TutorialEvidence evidence = buildTutorialEvidence(
-                parsedStockStatus,
+                kisMetrics.headlineQuote(),
+                kisMetrics,
                 disclosureData,
                 majorIssuesData,
                 financialData,
@@ -167,6 +176,7 @@ public class StockAiAnalysisService {
 
     private TutorialEvidence buildTutorialEvidence(
             String stockQuoteLine,
+            KisMarketMetrics kisMarketMetrics,
             DisclosureResponse disclosureData,
             DisclosureResponse majorIssuesData,
             FinancialResponse financialData,
@@ -180,6 +190,7 @@ public class StockAiAnalysisService {
     ) {
         return new TutorialEvidence(
                 stockQuoteLine,
+                kisMarketMetrics,
                 toDisclosureRefs(disclosureData),
                 toDisclosureRefs(majorIssuesData),
                 toFinancialLines(financialData),
@@ -191,6 +202,82 @@ public class StockAiAnalysisService {
                 toBoardRefs(boardPosts),
                 boardSentimentHint
         );
+    }
+
+    private KisMarketMetrics buildKisMarketMetrics(
+            KisStockResponse price,
+            KisInvestmentIndicatorResponse invest,
+            KisCcnlResponse ccnl
+    ) {
+        String headline = extractStockStatus(price);
+        if (price == null || price.output() == null) {
+            return new KisMarketMetrics(headline, "", "", "", "", "", "", "", "", "", "", "", headline);
+        }
+        Output o = price.output();
+        String rsi = "";
+        if (invest != null && invest.output() != null && invest.output().rsi() != null) {
+            rsi = invest.output().rsi().trim();
+        }
+        String strength = "";
+        String stTime = "";
+        if (ccnl != null && ccnl.output() != null && !ccnl.output().isEmpty()) {
+            var row = ccnl.output().get(0);
+            if (row.contractStrength() != null) {
+                strength = row.contractStrength().trim();
+            }
+            if (row.contractHour() != null) {
+                stTime = row.contractHour().trim();
+            }
+        }
+        String block = buildKisLlmContext(headline, o, rsi, strength, stTime);
+        return new KisMarketMetrics(
+                headline,
+                nz(o.per()),
+                nz(o.pbr()),
+                nz(o.eps()),
+                nz(o.bps()),
+                rsi,
+                nz(o.volumeTurnoverRate()),
+                nz(o.w52HighVsCurrentPct()),
+                nz(o.w52LowVsCurrentPct()),
+                nz(o.foreignHoldingRatio()),
+                strength,
+                stTime,
+                block
+        );
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s.trim();
+    }
+
+    private static void appendKisMetric(StringBuilder sb, String label, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        sb.append("\n- ").append(label).append(": ").append(value.trim());
+    }
+
+    private String buildKisLlmContext(String headline, Output o, String rsi, String strength, String stTime) {
+        StringBuilder sb = new StringBuilder(headline);
+        appendKisMetric(sb, "PER", o.per());
+        appendKisMetric(sb, "PBR", o.pbr());
+        appendKisMetric(sb, "EPS", o.eps());
+        appendKisMetric(sb, "BPS", o.bps());
+        appendKisMetric(sb, "거래량 회전율(%)", o.volumeTurnoverRate());
+        appendKisMetric(sb, "52주 최고가 대비 현재가(%)", o.w52HighVsCurrentPct());
+        appendKisMetric(sb, "52주 최저가 대비 현재가(%)", o.w52LowVsCurrentPct());
+        appendKisMetric(sb, "외국인 소진율(%)", o.foreignHoldingRatio());
+        if (!rsi.isBlank()) {
+            sb.append("\n- RSI(상대강도지수): ").append(rsi);
+        }
+        if (!strength.isBlank()) {
+            sb.append("\n- 당일 체결강도: ").append(strength);
+            if (!stTime.isBlank()) {
+                sb.append(" (참고 체결시각 ").append(stTime).append(")");
+            }
+        }
+        return sb.toString();
     }
 
     private List<DisclosureRef> toDisclosureRefs(DisclosureResponse data) {

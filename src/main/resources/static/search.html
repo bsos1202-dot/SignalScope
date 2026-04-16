@@ -127,13 +127,21 @@
             let html = '<div class="result-card">';
             html += '<div class="summary-block">' + nl2brEscaped(summary) + "</div>";
 
+            const km = ev.kisMarketMetrics;
+
             html += '<div class="indicator-bar">';
-            html += '<div class="quote-line">보조지표 · 시세 맥락</div>';
+            html += '<div class="quote-line">보조지표 · 시세 맥락 (한국투자증권)</div>';
             html += '<div>' + nl2brEscaped(ev.stockQuoteLine || "(시세 정보 없음)") + "</div>";
             if (ev.boardSentimentHint) {
                 html += '<div class="sentiment"><strong>커뮤니티(종목토론) 참고</strong> — ' + escapeHtml(ev.boardSentimentHint) + "</div>";
             }
             html += '<div class="chips">';
+            if (km) {
+                if (km.per) html += '<span class="chip">PER ' + escapeHtml(km.per) + "</span>";
+                if (km.pbr) html += '<span class="chip">PBR ' + escapeHtml(km.pbr) + "</span>";
+                if (km.rsi) html += '<span class="chip">RSI ' + escapeHtml(km.rsi) + "</span>";
+                if (km.contractStrength) html += '<span class="chip">체결강도 ' + escapeHtml(km.contractStrength) + "</span>";
+            }
             html += '<span class="chip">DART 공시 ' + dDart + "건</span>";
             html += '<span class="chip">주요 공시 ' + dMajor + "건</span>";
             html += '<span class="chip">뉴스 참조 ' + newsTotal + "건</span>";
@@ -143,6 +151,25 @@
             html += '<details class="evidence-panel">';
             html += "<summary>참조한 공시 · 기사 · 종목토론 제목 보기</summary>";
             html += '<div class="evidence-body">';
+
+            if (km && (km.per || km.pbr || km.rsi || km.contractStrength || km.llmContextBlock)) {
+                html += '<div class="evidence-section"><h4>한국투자증권 — 시세·밸류에이션·기술·체결</h4><ul>';
+                function mrow(label, val) {
+                    if (val) html += "<li><strong>" + escapeHtml(label) + "</strong> " + escapeHtml(val) + "</li>";
+                }
+                mrow("PER", km.per);
+                mrow("PBR", km.pbr);
+                mrow("EPS", km.eps);
+                mrow("BPS", km.bps);
+                mrow("RSI", km.rsi);
+                mrow("거래량 회전율(%)", km.volumeTurnoverRate);
+                mrow("52주 최고가 대비(%)", km.w52HighVsCurrentPct);
+                mrow("52주 최저가 대비(%)", km.w52LowVsCurrentPct);
+                mrow("외국인 소진율(%)", km.foreignHoldingRatio);
+                mrow("당일 체결강도", km.contractStrength);
+                mrow("체결 시각(참고)", km.contractStrengthTime);
+                html += "</ul></div>";
+            }
 
             if (dDart > 0) {
                 html += '<div class="evidence-section"><h4>금일·최근 검색 공시 (DART)</h4><ul>';

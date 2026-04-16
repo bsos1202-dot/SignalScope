@@ -7,6 +7,7 @@ import java.util.List;
  */
 public record TutorialEvidence(
         String stockQuoteLine,
+        KisMarketMetrics kisMarketMetrics,
         List<DisclosureRef> dartDisclosures,
         List<DisclosureRef> dartMajorIssues,
         List<String> financialLines,

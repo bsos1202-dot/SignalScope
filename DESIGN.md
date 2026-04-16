@@ -71,8 +71,11 @@ flowchart LR
 
 `StockAiAnalysisService.generateWhyApproachTutorial(...)` 가 단일 오케스트레이션 역할을 한다.
 
-1. **시세 (KIS)**  
-   - 단축코드(6자리)로 현재가·등락·거래량 등 텍스트 요약.
+1. **시세·지표 (KIS)**  
+   - `inquire-price`: 현재가·등락·거래량, PER/PBR/EPS/BPS, 거래량 회전율, 52주 고저 대비, 외국인 소진율 등.  
+   - `inquire-investment-indicator`(TR FHKST01010900): RSI(`rsiv_val`) 등.  
+   - `inquire-ccnl`(TR FHKST01010300): 시간대별 체결·**당일 체결강도**(`tday_rltv`) 등.  
+   - 위 값을 `KisMarketMetrics`로 묶어 LLM 입력과 `evidence`에 반영.
 
 2. **공시·재무 (DART)**  
    - `DartCorpCodeManager` 등으로 **6자리 → 8자리 DART 코드** 매핑 후 공시·재무·원문 ZIP(가능 시) 처리.
