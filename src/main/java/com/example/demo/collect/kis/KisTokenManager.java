@@ -2,6 +2,8 @@ package com.example.demo.collect.kis;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -36,14 +38,15 @@ public class KisTokenManager {
 
     // 멀티 스레드 환경에서 안전하게 토큰을 읽고 쓰기 위해 AtomicReference 사용
     private final AtomicReference<String> cachedToken = new AtomicReference<>();
+    private final AtomicBoolean issueInProgress = new AtomicBoolean(false);
 
     /**
      * 서버 가동 시 최초 1회 실행하여 토큰을 발급받습니다.
      */
     @PostConstruct
     public void init() {
-        log.info("[서버기동 시]초기 한국투자증권 Access Token 발급을 시작합니다.");
-        issueToken();
+        log.info("[서버기동 시]초기 한국투자증권 Access Token 백그라운드 발급 시작");
+        CompletableFuture.runAsync(this::issueTokenSafely);
     }
 
     /**
@@ -53,12 +56,23 @@ public class KisTokenManager {
     @Scheduled(fixedRate = 43200000)
     public void refreshToken() {
         log.info("[스케쥴]한국투자증권 Access Token 정기 갱신을 시작합니다.");
-        //issueToken();
+        issueTokenSafely();
     }
 
     /**
      * 실제 토큰 발급 API를 호출하는 내부 로직
      */
+    private void issueTokenSafely() {
+        if (!issueInProgress.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            issueToken();
+        } finally {
+            issueInProgress.set(false);
+        }
+    }
+
     private void issueToken() {
         String url = baseUrl + "/oauth2/tokenP";
 
@@ -88,6 +102,9 @@ public class KisTokenManager {
      * 다른 서비스(클라이언트)에서 캐싱된 토큰을 가져다 쓸 때 호출하는 메서드
      */
     public String getAccessToken() {
+        if (cachedToken.get() == null) {
+            issueTokenSafely();
+        }
         return cachedToken.get();
     }
 }

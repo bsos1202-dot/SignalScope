@@ -53,6 +53,18 @@ public class StockAiAnalysisService {
     @Value("${app.hanwha-research.enabled:true}")
     private boolean hanwhaResearchEnabled;
 
+    @Value("${app.news.naver.stock-display-count:3}")
+    private int naverNewsStockDisplayCount;
+
+    @Value("${app.news.google.stock-display-count:5}")
+    private int googleNewsStockDisplayCount;
+
+    @Value("${app.news.naver.market-display-count:3}")
+    private int naverNewsMarketDisplayCount;
+
+    @Value("${app.news.google.market-display-count:3}")
+    private int googleNewsMarketDisplayCount;
+
     private final DartApiClient dartApiClient;
     private final DartDailyFileCacheService dartDailyFileCacheService;
     private final MarketNewsFileCacheService marketNewsFileCacheService;
@@ -65,8 +77,15 @@ public class StockAiAnalysisService {
     private final HanwhaResearchListClient hanwhaResearchListClient;
     private final HanwhaResearchDailyCacheService hanwhaResearchDailyCacheService;
 
-    public AiTutorialResponse generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
-        log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작", corpName);
+    public AiTutorialResponse generateWhyApproachTutorial(
+            String stockCode,
+            String dartCode,
+            String corpName,
+            String market,
+            String today,
+            boolean naverBoardScrapeEnabled
+    ) {
+        log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작 (naverBoard={})", corpName, naverBoardScrapeEnabled);
 
         // 1. 시장 현재 상태 수집 (한국투자증권 — 거래량·밸류·RSI·체결강도 등; LLM 입력에서는 등락·가격·52주% 제외)
         String validAccessToken = kisTokenManager.getAccessToken();
@@ -106,10 +125,12 @@ public class StockAiAnalysisService {
         // 3. 시장 반응 데이터 수집 (멀티 채널 뉴스 - 종목명 기반 검색)
         String newsKeyword = corpName + " 주식";
         
-        NaverNewsResponse naverData = naverNewsApiClient.searchNews(newsKeyword, 3);
+        int naverStockN = clampDisplayCount(naverNewsStockDisplayCount, 1, 100);
+        int googleStockN = clampDisplayCount(googleNewsStockDisplayCount, 1, 50);
+        NaverNewsResponse naverData = naverNewsApiClient.searchNews(newsKeyword, naverStockN);
         String parsedNaverNews = extractNaverNews(naverData);
         
-        List<RssNewsItem> googleRssKeyword = googleNewsApiClient.searchNewsItems(newsKeyword, 5);
+        List<RssNewsItem> googleRssKeyword = googleNewsApiClient.searchNewsItems(newsKeyword, googleStockN);
         List<String> googleNewsList = googleRssKeyword.stream()
                 .map(i -> "- [구글] " + i.title() + " (" + i.pubDate() + ")")
                 .collect(Collectors.toList());
@@ -125,8 +146,10 @@ public class StockAiAnalysisService {
                 naverMarketData = marketCached.get().naverMarket();
                 googleRssMarket = marketCached.get().googleMarket();
             } else {
-                naverMarketData = naverNewsApiClient.searchNews(marketNewsKeyword, 3);
-                googleRssMarket = googleNewsApiClient.searchNewsItems(mktTrim, 3);
+                int naverMktN = clampDisplayCount(naverNewsMarketDisplayCount, 1, 100);
+                int googleMktN = clampDisplayCount(googleNewsMarketDisplayCount, 1, 50);
+                naverMarketData = naverNewsApiClient.searchNews(marketNewsKeyword, naverMktN);
+                googleRssMarket = googleNewsApiClient.searchNewsItems(mktTrim, googleMktN);
                 marketNewsFileCacheService.put(mktTrim, naverMarketData, googleRssMarket);
             }
         }
@@ -143,15 +166,26 @@ public class StockAiAnalysisService {
         List<HanwhaResearchListItem> hanwhaResearchItems = hanwhaResearchEnabled
                 ? hanwhaResearchDailyCacheService.getOrLoadToday(hanwhaResearchListClient::fetchFirstPage)
                 : List.of();
-        String parsedHanwhaResearch = hanwhaResearchEnabled
-                ? buildHanwhaResearchLlmBlock(hanwhaResearchItems)
-                : "(한화 WM 리서치 수집 비활성화)";
+        String code6 = stockCode != null ? stockCode.trim() : "";
+        List<HanwhaResearchListItem> hanwhaResearchForStock = hanwhaResearchEnabled
+                ? filterHanwhaItemsMatchingStockCode(code6, hanwhaResearchItems)
+                : List.of();
 
-        // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑)
-        List<StockBoardPost> boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
-        String parsedBoardPosts = formatNaverBoardPosts(boardPosts);
-        String boardSentimentHint = summarizeBoardSentiment(boardPosts);
-        
+        // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑 — 요청에서 끌 수 있음)
+        List<StockBoardPost> boardPosts;
+        String parsedBoardPosts;
+        String boardSentimentHint;
+        if (naverBoardScrapeEnabled) {
+            boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
+            parsedBoardPosts = formatNaverBoardPosts(boardPosts);
+            boardSentimentHint = summarizeBoardSentiment(boardPosts);
+        } else {
+            boardPosts = List.of();
+            parsedBoardPosts = "(네이버 종목토론방 수집 생략 — 요청에서 제외)";
+            boardSentimentHint = "";
+            log.info("[네이버종목토론] 사용자 설정으로 스크래핑 생략");
+        }
+
         log.info("[한국투자증권] 주가정보 - " + parsedStockStatus);
         log.info("[DART] 공시정보 - " + parsedFinancials);
         log.info("[DART] 소유정보 - {}", ownershipLlmBlock.isBlank()
@@ -162,24 +196,58 @@ public class StockAiAnalysisService {
         log.info("[구글RSS] 뉴스 - " + parsedGoogleNews);
         log.info("[네이버API] 시장 키워드 뉴스 - {}", parsedNaverNewsMarket);
         log.info("[구글RSS] 시장 키워드 뉴스 - {}", parsedGoogleNewsMarket);
-        log.info("[한화WM 리서치] 목록 {}건 — {}", hanwhaResearchItems.size(),
-                hanwhaResearchEnabled ? "스냅샷 반영" : "비활성화");
-        log.info("[네이버종목토론] 요약 - {}", boardSentimentHint);
+        log.info("[한화WM 리서치] 원본 {}건, 종목코드 매칭 {}건 — {}", hanwhaResearchItems.size(), hanwhaResearchForStock.size(),
+                hanwhaResearchEnabled ? "스냅샷" : "비활성화");
+        if (naverBoardScrapeEnabled) {
+            log.info("[네이버종목토론] 요약 - {}", boardSentimentHint);
+        }
+
+        TutorialEvidence evidence = buildTutorialEvidence(
+                kisMetrics.headlineQuote(),
+                kisMetrics,
+                disclosureData,
+                majorIssuesData,
+                financialData,
+                ownershipData,
+                documentSummary,
+                naverData,
+                googleRssKeyword,
+                naverMarketData,
+                googleRssMarket,
+                hanwhaResearchForStock,
+                boardPosts,
+                boardSentimentHint
+        );
+
+        boolean hanwhaResearchInLlm = !hanwhaResearchForStock.isEmpty();
+        String otherChannelsWhenHanwhaMissing = naverBoardScrapeEnabled
+                ? "시세·공시·뉴스·토론은 포함됨."
+                : "시세·공시·뉴스는 포함됨(종목토론은 요청에서 생략).";
+        String parsedHanwhaResearch = !hanwhaResearchEnabled
+                ? "(한화 WM 리서치 수집 비활성화)"
+                : (hanwhaResearchInLlm
+                        ? buildHanwhaResearchLlmBlock(hanwhaResearchForStock)
+                        : "(당일 1페이지 목록에 해당 종목코드가 제목·요약·링크에 포함된 한화 WM 리서치가 없어 AI 입력에서 제외함. "
+                                + otherChannelsWhenHanwhaMissing + ")");
+        if (hanwhaResearchEnabled && !hanwhaResearchInLlm) {
+            log.info("한화 WM 리서치에 종목코드 {} 미포함 — LLM 입력에서 리서치 블록만 제외, OpenAI 호출 유지", code6);
+        }
 
         // 5. WHY Approach 시스템 프롬프트 조립
-        String systemPrompt = """
-            당신은 주식 투자를 처음 시작하는 사람들에게 단기간 종목이 왜 움직였는지를 알려주는 가이드입니다.
-            많은 사람들이 주식 가격이 왜 움직였는지 이해를 돕는 것이 우리의 가장 큰 목표입니다.
-            사용자들은 지식의 편차가 심하므로, 전문 용어를 최대한 배제하고 쉽게 비유해서 설명해야 합니다.
-            입력 데이터에는 등락률·현재가·52주 대비 등이 포함되어 있지 않습니다. **전일 대비 몇 % 올랐다/내렸다, 현재가, 52주 대비 몇 %** 같은 표현은 하지 마세요. 거래량·거래대금·회전율·체결강도·PER·RSI·공시·뉴스·토론 분위기 위주로 맥락을 설명하세요.
-            제공된 '시장 참고 수치'를 먼저 짚어주고, 공시와 뉴스를 바탕으로 분위기와 배경을 인과관계로 설명하세요.
-            PER·PBR·RSI·체결강도 등은 증권사 API가 준 참고 수치일 뿐이며, 투자의 정답이나 매수·매도 신호가 아님을 유의해 설명하세요.
-            네이버 종목토론방 글은 개인 의견·감정에 가깝고 추천/비추천 수도 참고용입니다. 여론을 사실처럼 단정하지 말고, '커뮤니티에서는 이런 분위기가 보인다' 수준으로 짧게 언급하세요.
-            한화투자증권 WM '기업·산업분석' 목록은 웹에서 가져온 1페이지 스냅샷일 뿐이며, 해당 종목과 직접 관련이 없을 수 있습니다. 투자 권유나 매수·매도 의견이 아님을 밝히고, 제목·요약 수준만 배경 참고로 짧게 언급하세요.
-            사용자가 스스로 시장을 이해하고 당사 MTS에 계속 머물며 학습하고 싶도록 작성해 주세요.
+        String systemPrompt = buildWhyApproachSystemPrompt(hanwhaResearchEnabled, hanwhaResearchInLlm, naverBoardScrapeEnabled);
+
+        String whyApproachQuestions = buildWhyApproachQuestions(hanwhaResearchInLlm, naverBoardScrapeEnabled);
+
+        String communityBlockForPrompt = naverBoardScrapeEnabled
+                ? """
+            10. 여론 요약(추천/비추천 합계 기반 참고): %s
+            %s
+            """.formatted(boardSentimentHint, parsedBoardPosts)
+                : """
+            10. (네이버 종목토론방: 요청에 따라 수집·입력 생략)
             """;
 
-        String userPrompt = String.format("""
+        String userPromptHead = String.format("""
             다음은 특정 기업의 실시간 데이터입니다.
             
             [현재 시장 상황 — 한국투자증권 시세·지표]
@@ -200,44 +268,132 @@ public class StockAiAnalysisService {
             8. 구글 RSS 뉴스(시장 키워드):
             %s
             
-            [증권사 리서치 — 한화투자증권 WM 기업·산업분석 목록 1페이지, 당일 캐시된 스크래핑 스냅샷]
-            9. 리서치 제목·요약(참고, 종목과 무관할 수 있음):
+            [증권사 리서치 — 한화투자증권 WM 기업·산업분석, 당일 1페이지 중 해당 종목코드가 제목·요약·URL에 포함된 항목만]
+            9. 리서치 제목·요약:
             %s
             
-            [커뮤니티 반응 — 네이버 종목토론방 최신 글 5개]
-            10. 여론 요약(추천/비추천 합계 기반 참고): %s
-            %s
-            
-            위 사실을 바탕으로:
-            - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
-            - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
-            - 한화 WM 리서치 목록이 오늘의 시장/섹터 분위기와 어떻게 겹쳐 보이는지 한 문장(해당 없으면 생략)?
-            - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
-            를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것.)
+            [커뮤니티 반응 — 네이버 종목토론방]
             """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary,
                 ownershipSectionForPrompt(ownershipLlmBlock),
                 parsedNaverNews, parsedGoogleNews, parsedNaverNewsMarket, parsedGoogleNewsMarket,
-                parsedHanwhaResearch,
-                boardSentimentHint, parsedBoardPosts);
+                parsedHanwhaResearch);
+        String userPrompt = userPromptHead + communityBlockForPrompt + "\n\n" + whyApproachQuestions;
 
         String summary = openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
-        TutorialEvidence evidence = buildTutorialEvidence(
-                kisMetrics.headlineQuote(),
-                kisMetrics,
-                disclosureData,
-                majorIssuesData,
-                financialData,
-                ownershipData,
-                documentSummary,
-                naverData,
-                googleRssKeyword,
-                naverMarketData,
-                googleRssMarket,
-                hanwhaResearchItems,
-                boardPosts,
-                boardSentimentHint
-        );
         return new AiTutorialResponse(summary, evidence);
+    }
+
+    private static String buildWhyApproachQuestions(boolean hanwhaResearchInLlm, boolean naverBoardInLlm) {
+        if (hanwhaResearchInLlm && naverBoardInLlm) {
+            return """
+                    위 사실을 바탕으로:
+                    - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
+                    - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
+                    - 한화 WM 리서치 목록이 오늘의 시장/섹터 분위기와 어떻게 겹쳐 보이는지 한 문장(해당 없으면 생략)?
+                    - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
+                    를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것.)
+                    """;
+        }
+        if (hanwhaResearchInLlm) {
+            return """
+                    위 사실을 바탕으로:
+                    - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
+                    - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
+                    - 한화 WM 리서치 목록이 오늘의 시장/섹터 분위기와 어떻게 겹쳐 보이는지 한 문장(해당 없으면 생략)?
+                    를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것. 네이버 종목토론은 입력에 없으므로 커뮤니티 반응에 대해서는 언급하지 말 것.)
+                    """;
+        }
+        if (naverBoardInLlm) {
+            return """
+                    위 사실을 바탕으로:
+                    - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
+                    - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
+                    - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
+                    를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것. 한화 WM 리서치는 입력에 없으므로 증권사 리서치 목록에 대해서는 언급하지 말 것.)
+                    """;
+        }
+        return """
+                위 사실을 바탕으로:
+                - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
+                - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
+                를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것. 한화 WM 리서치는 입력에 없으며 증권사 리서치에 대해 언급하지 말 것. 네이버 종목토론은 입력에 없으며 커뮤니티 반응에 대해 언급하지 말 것.)
+                """;
+    }
+
+    private static String buildWhyApproachSystemPrompt(
+            boolean hanwhaResearchEnabled,
+            boolean hanwhaResearchInLlm,
+            boolean naverBoardInLlm
+    ) {
+        String dataScopeLine = naverBoardInLlm
+                ? """
+                입력 데이터에는 등락률·현재가·52주 대비 등이 포함되어 있지 않습니다. **전일 대비 몇 % 올랐다/내렸다, 현재가, 52주 대비 몇 %** 같은 표현은 하지 마세요. 거래량·거래대금·회전율·체결강도·PER·RSI·공시·뉴스·토론 분위기 위주로 맥락을 설명하세요.
+                """
+                : """
+                입력 데이터에는 등락률·현재가·52주 대비 등이 포함되어 있지 않습니다. **전일 대비 몇 % 올랐다/내렸다, 현재가, 52주 대비 몇 %** 같은 표현은 하지 마세요. 거래량·거래대금·회전율·체결강도·PER·RSI·공시·뉴스 위주로 맥락을 설명하세요.
+                """;
+        String communityLine = naverBoardInLlm
+                ? """
+                네이버 종목토론방 글은 개인 의견·감정에 가깝고 추천/비추천 수도 참고용입니다. 여론을 사실처럼 단정하지 말고, '커뮤니티에서는 이런 분위기가 보인다' 수준으로 짧게 언급하세요.
+                """
+                : """
+                오늘 입력에는 네이버 종목토론방 데이터가 포함되어 있지 않습니다. 토론방·커뮤니티 반응에 대해서는 설명하지 마세요.
+                """;
+        String common = """
+                당신은 주식 투자를 처음 시작하는 사람들에게 단기간 종목이 왜 움직였는지를 알려주는 가이드입니다.
+                많은 사람들이 주식 가격이 왜 움직였는지 이해를 돕는 것이 우리의 가장 큰 목표입니다.
+                사용자들은 지식의 편차가 심하므로, 전문 용어를 최대한 배제하고 쉽게 비유해서 설명해야 합니다.
+                """ + dataScopeLine + """
+                제공된 '시장 참고 수치'를 먼저 짚어주고, 공시와 뉴스를 바탕으로 분위기와 배경을 인과관계로 설명하세요.
+                PER·PBR·RSI·체결강도 등은 증권사 API가 준 참고 수치일 뿐이며, 투자의 정답이나 매수·매도 신호가 아님을 유의해 설명하세요.
+                """ + communityLine;
+        String hanwhaWhenPresent = """
+                한화투자증권 WM '기업·산업분석'으로 넘어온 항목은 당일 1페이지 목록 중 해당 종목의 6자리 코드가 제목·요약·URL에 포함된 것만입니다. 투자 권유나 매수·매도 의견이 아님을 밝히고, 제목·요약 수준만 배경 참고로 짧게 언급하세요.
+                """;
+        String hanwhaOmitted = """
+                오늘 사용자 데이터에는 한화투자증권 WM '기업·산업분석' 리서치 목록 본문이 포함되어 있지 않습니다(당일 1페이지에 해당 종목코드가 없음). 한화·증권사 리서치 목록이나 리포트에 대해서는 설명하지 마세요.
+                """;
+        String closing = """
+                사용자가 스스로 시장을 이해하고 당사 MTS에 계속 머물며 학습하고 싶도록 작성해 주세요.
+                """;
+        if (!hanwhaResearchEnabled) {
+            return common + hanwhaWhenPresent + closing;
+        }
+        if (hanwhaResearchInLlm) {
+            return common + hanwhaWhenPresent + closing;
+        }
+        return common + hanwhaOmitted + closing;
+    }
+
+    /**
+     * 당일 한화 WM 1페이지 목록 중, 제목·요약·링크에 6자리 단축코드가 포함된 항목만 반환합니다.
+     */
+    private static List<HanwhaResearchListItem> filterHanwhaItemsMatchingStockCode(
+            String stockCode6,
+            List<HanwhaResearchListItem> items
+    ) {
+        if (stockCode6 == null || !stockCode6.matches("^\\d{6}$") || items == null || items.isEmpty()) {
+            return List.of();
+        }
+        return items.stream()
+                .filter(i -> fieldContainsStockCode(stockCode6, i.title())
+                        || fieldContainsStockCode(stockCode6, i.snippet())
+                        || fieldContainsStockCode(stockCode6, i.link()))
+                .collect(Collectors.toList());
+    }
+
+    private static boolean fieldContainsStockCode(String code6, String text) {
+        return text != null && text.contains(code6);
+    }
+
+    private static int clampDisplayCount(int value, int min, int max) {
+        if (value < min) {
+            return min;
+        }
+        if (value > max) {
+            return max;
+        }
+        return value;
     }
 
     private TutorialEvidence buildTutorialEvidence(

@@ -35,13 +35,15 @@ public class AiAnalysisController {
     /**
      * AI 기반 WHY Approach 종목 튜토리얼 생성 API
      * 프론트엔드(검색 화면)에서 /ai/tutorial?corp_code=005930&corp_name=삼성전자 형태로 호출합니다.
+     * {@code naver_board=false}이면 네이버 종목토론 스크래핑 및 AI 입력·요약에서 커뮤니티 반응을 제외합니다(기본 {@code true}).
      * 응답: {@link AiTutorialResponse} — 요약(summary)과 참조 근거(evidence).
      */
     @GetMapping(value = "/ai/tutorial", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> getAiTutorial(
             @RequestParam("corp_code") String stockCode, // 6자리 단축코드
             @RequestParam("corp_name") String corpName,
-            @RequestParam(value = "market", defaultValue = "") String market) {
+            @RequestParam(value = "market", defaultValue = "") String market,
+            @RequestParam(value = "naver_board", defaultValue = "true") boolean naverBoardScrapeEnabled) {
             
         log.info("AI 튜토리얼 분석 요청 수신 - 종목명: {}, 코드: {}", corpName, stockCode);
 
@@ -55,7 +57,7 @@ public class AiAnalysisController {
 
         String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-        Optional<TutorialCacheFile> cached = tutorialFileCacheService.readIfValid(stockCode.trim());
+        Optional<TutorialCacheFile> cached = tutorialFileCacheService.readIfValid(stockCode.trim(), naverBoardScrapeEnabled);
         if (cached.isPresent()) {
             TutorialCacheFile envelope = cached.get();
             HttpHeaders headers = new HttpHeaders();
@@ -65,8 +67,9 @@ public class AiAnalysisController {
             return ResponseEntity.ok().headers(headers).body(envelope.response());
         }
 
-        AiTutorialResponse report = aiAnalysisService.generateWhyApproachTutorial(stockCode, dartCode, corpName, market, today);
-        tutorialFileCacheService.put(stockCode.trim(), corpName, market, report);
+        AiTutorialResponse report = aiAnalysisService.generateWhyApproachTutorial(
+                stockCode, dartCode, corpName, market, today, naverBoardScrapeEnabled);
+        tutorialFileCacheService.put(stockCode.trim(), corpName, market, naverBoardScrapeEnabled, report);
 
         HttpHeaders headers = new HttpHeaders();
         headers.add("X-AIS-Tutorial-Cache", "MISS");

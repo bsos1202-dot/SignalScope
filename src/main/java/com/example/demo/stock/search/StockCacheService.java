@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -43,7 +44,8 @@ public class StockCacheService {
 
     @PostConstruct
     public void init() {
-        refreshCacheIfNeeded();
+        log.info("종목 마스터 캐시 초기화 백그라운드 시작");
+        CompletableFuture.runAsync(this::refreshCacheIfNeeded);
     }
 
     /**

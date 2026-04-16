@@ -3,7 +3,9 @@ package com.example.demo.collect.dart;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -33,11 +35,19 @@ public class DartCorpCodeManager {
 
     // 6자리 주식코드 -> 8자리 DART 고유번호 매핑 저장소
     private final Map<String, String> stockToDartCodeMap = new ConcurrentHashMap<>();
+    private final AtomicBoolean loadingStarted = new AtomicBoolean(false);
 
     @PostConstruct
     public void init() {
-        log.info("DART 고유번호 매핑 데이터를 수집합니다.");
-        loadDartCorpCodes();
+        startAsyncLoadIfNeeded();
+    }
+
+    private void startAsyncLoadIfNeeded() {
+        if (!loadingStarted.compareAndSet(false, true)) {
+            return;
+        }
+        log.info("DART 고유번호 매핑 백그라운드 수집 시작");
+        CompletableFuture.runAsync(this::loadDartCorpCodes);
     }
 
     private void loadDartCorpCodes() {
@@ -90,6 +100,9 @@ public class DartCorpCodeManager {
      * 6자리 주식코드를 입력하면 8자리 DART 코드를 반환합니다.
      */
     public String getDartCode(String stockCode) {
+        if (stockToDartCodeMap.isEmpty()) {
+            startAsyncLoadIfNeeded();
+        }
         return stockToDartCodeMap.get(stockCode);
     }
 }

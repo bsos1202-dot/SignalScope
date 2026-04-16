@@ -39,11 +39,11 @@ public class AiTutorialFileCacheService {
     /**
      * 유효한 캐시 래퍼가 있으면 반환합니다 (본문 + 만료 시각).
      */
-    public Optional<TutorialCacheFile> readIfValid(String stockCode) {
+    public Optional<TutorialCacheFile> readIfValid(String stockCode, boolean naverBoardScrapeEnabled) {
         if (!isValidCode(stockCode)) {
             return Optional.empty();
         }
-        Path file = filePath(stockCode);
+        Path file = filePath(stockCode, naverBoardScrapeEnabled);
         if (!Files.isRegularFile(file)) {
             return Optional.empty();
         }
@@ -53,11 +53,15 @@ public class AiTutorialFileCacheService {
             if (envelope == null || envelope.response() == null) {
                 return Optional.empty();
             }
+            if (envelope.version() != TutorialCacheFile.CURRENT_VERSION) {
+                log.debug("튜토리얼 캐시 버전 불일치 — 무시: {} (파일 v{} 현재 v{})", file, envelope.version(), TutorialCacheFile.CURRENT_VERSION);
+                return Optional.empty();
+            }
             if (envelope.isExpired()) {
                 log.debug("튜토리얼 캐시 만료됨 — 무시: {}", file);
                 return Optional.empty();
             }
-            log.info("튜토리얼 캐시 HIT: {}", stockCode);
+            log.info("튜토리얼 캐시 HIT: {} (naverBoard={})", stockCode, naverBoardScrapeEnabled);
             return Optional.of(envelope);
         } catch (Exception e) {
             log.warn("튜토리얼 캐시 읽기 실패 — 무시: {}", file, e);
@@ -68,7 +72,7 @@ public class AiTutorialFileCacheService {
     /**
      * 응답을 캐시에 기록합니다. 임시 파일에 쓴 뒤 rename 으로 교체합니다.
      */
-    public void put(String stockCode, String corpName, String market, AiTutorialResponse response) {
+    public void put(String stockCode, String corpName, String market, boolean naverBoardScrapeEnabled, AiTutorialResponse response) {
         if (!isValidCode(stockCode) || response == null) {
             return;
         }
@@ -86,7 +90,7 @@ public class AiTutorialFileCacheService {
                     response
             );
             byte[] json = objectMapper.writeValueAsBytes(envelope);
-            Path target = filePath(stockCode);
+            Path target = filePath(stockCode, naverBoardScrapeEnabled);
             Path tmp = dir.resolve(stockCode + ".json." + Thread.currentThread().getId() + ".tmp");
             Files.write(tmp, json);
             try {
@@ -111,9 +115,13 @@ public class AiTutorialFileCacheService {
         return dir;
     }
 
-    private Path filePath(String stockCode) {
+    /**
+     * 네이버 종목토론 포함 여부에 따라 별도 파일을 씁니다(동일 종목이라도 토글에 따라 응답이 달라짐).
+     */
+    private Path filePath(String stockCode, boolean naverBoardScrapeEnabled) {
         try {
-            return ensureDirectory().resolve(stockCode + ".json");
+            String suffix = naverBoardScrapeEnabled ? ".json" : "-nb-off.json";
+            return ensureDirectory().resolve(stockCode.trim() + suffix);
         } catch (IOException e) {
             throw new IllegalStateException("캐시 디렉터리 생성 실패", e);
         }
