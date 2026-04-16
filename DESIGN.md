@@ -66,6 +66,7 @@ flowchart LR
 | `collect.news.cache` | 시장 키워드 뉴스 **파일 캐시** (`MarketNewsFileCacheService`) |
 | `collect.dart.cache` | DART API **일 단위 파일 캐시** (`DartDailyFileCacheService`) |
 | `collect.naverboard` | 네이버 금융 **종목토론 목록** HTML 파싱 (비공식) |
+| `collect.hanwha` | 한화 WM **기업·산업분석** 목록 1페이지 스크래핑 + 일 캐시 |
 | `ai.openai` | OpenAI 호출, 튜토리얼용 프롬프트 조립 |
 | `ai.cache` | 튜토리얼 응답 **파일 캐시** (`TutorialCacheFile`, `AiTutorialFileCacheService`) |
 | `ai.controller` | `/ai/tutorial` REST |
@@ -182,6 +183,8 @@ flowchart LR
 | **기술** | 목록은 HTML·세션·봇 방어(캡차·레이트 리밋)에 의존할 수 있어, DOM 변경 시 **유지보수 비용이 네이버 종목토론과 동급 이상**으로 간주한다. |
 | **대안** | 한화(또는 타사)와 **제휴·RSS·REST 피드**로 공식 제공받거나, **DART·뉴스·벤더(FnGuide 등)** 조합으로 리서치 맥락을 구성하는 편이 운영·컴플라이언스에 유리하다. |
 | **결론** | 데모·내부 PoC 외 **상용 MTS 기본 경로로 스크래핑 도입은 비권장**. 반드시 도입 시 별도 **동의·계약·출처 표기·저장 주기** 정책을 둔다. |
+
+**구현 상태(요청 반영)**: `HanwhaResearchListClient` + `HanwhaResearchDailyCacheService`로 목록 1페이지를 수집·`cache/hanwha-research/{날짜}.json`에 일 캐시하며, `TutorialEvidence.hanwhaResearch` 및 LLM 프롬프트에 포함한다. `app.hanwha-research.enabled=false`로 비활성화 가능.
 
 ---
 

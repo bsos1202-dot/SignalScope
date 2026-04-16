@@ -46,3 +46,6 @@ cache/tutorial/*.json
 cache/market-news/*.json
 cache/dart/daily/**/*.json
 cache/dart/daily/**/*.zip
+
+# 한화 WM 리서치 일 캐시
+cache/hanwha-research/*.json

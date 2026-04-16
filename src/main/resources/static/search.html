@@ -120,9 +120,11 @@
             const dMajor = (ev.dartMajorIssues || []).length;
             const nNaver = (ev.naverNews || []).length;
             const nGoog = (ev.googleNews || []).length;
+            const nNaverMkt = (ev.naverNewsMarket || []).length;
             const nMkt = (ev.googleNewsMarket || []).length;
+            const nHanwha = (ev.hanwhaResearch || []).length;
             const nBoard = (ev.boardPosts || []).length;
-            const newsTotal = nNaver + nGoog + nMkt;
+            const newsTotal = nNaver + nGoog + nNaverMkt + nMkt;
 
             let html = '<div class="result-card">';
             if (cacheNote) {
@@ -148,11 +150,12 @@
             html += '<span class="chip">DART 공시 ' + dDart + "건</span>";
             html += '<span class="chip">주요 공시 ' + dMajor + "건</span>";
             html += '<span class="chip">뉴스 참조 ' + newsTotal + "건</span>";
+            html += '<span class="chip">한화 WM 리서치 ' + nHanwha + "건</span>";
             html += '<span class="chip">종목토론 ' + nBoard + "건</span>";
             html += "</div></div>";
 
             html += '<details class="evidence-panel">';
-            html += "<summary>참조한 공시 · 기사 · 종목토론 제목 보기</summary>";
+            html += "<summary>참조한 공시 · 기사 · 리서치 · 종목토론 보기</summary>";
             html += '<div class="evidence-body">';
 
             if (km && (km.per || km.pbr || km.rsi || km.contractStrength || km.llmContextBlock)) {
@@ -237,6 +240,21 @@
                 html += "</ul></div>";
             }
 
+            if (nNaverMkt > 0) {
+                html += '<div class="evidence-section"><h4>네이버 뉴스 (시장 키워드)</h4><ul>';
+                (ev.naverNewsMarket || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.link) {
+                        t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
+                    }
+                    let sub = "";
+                    if (r.publishedAt) sub += " <span class=\"muted\">" + escapeHtml(r.publishedAt) + "</span>";
+                    if (r.description) sub += "<br><span class=\"muted\">" + escapeHtml(r.description) + "</span>";
+                    html += "<li>" + t + sub + "</li>";
+                });
+                html += "</ul></div>";
+            }
+
             if (nMkt > 0) {
                 html += '<div class="evidence-section"><h4>구글 뉴스 (시장 키워드)</h4><ul>';
                 (ev.googleNewsMarket || []).forEach(function (r) {
@@ -245,6 +263,24 @@
                         t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
                     }
                     html += "<li>" + t + (r.publishedAt ? ' <span class="muted">' + escapeHtml(r.publishedAt) + "</span>" : "") + "</li>";
+                });
+                html += "</ul></div>";
+            }
+
+            if (nHanwha > 0) {
+                html += '<div class="evidence-section"><h4>한화투자증권 WM — 기업·산업분석 (목록 1페이지 스냅샷)</h4><ul>';
+                (ev.hanwhaResearch || []).forEach(function (r) {
+                    let t = escapeHtml(r.title || "");
+                    if (r.link) {
+                        t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener noreferrer">' + t + "</a>";
+                    }
+                    let meta = "";
+                    if (r.category) meta += escapeHtml(r.category);
+                    if (r.author) meta += (meta ? " · " : "") + escapeHtml(r.author);
+                    if (r.publishedAt) meta += (meta ? " · " : "") + escapeHtml(r.publishedAt);
+                    let sub = meta ? ' <span class="muted">' + meta + "</span>" : "";
+                    if (r.snippet) sub += '<br><span class="muted">' + escapeHtml(r.snippet) + "</span>";
+                    html += "<li>" + t + sub + "</li>";
                 });
                 html += "</ul></div>";
             }

@@ -12,6 +12,7 @@
 - **튜토리얼 파일 캐시**: 동일 6자리 종목에 대해 설정한 TTL(기본 10분) 안에서는 `cache/tutorial/{코드}.json`에 저장된 응답을 그대로 반환해 외부 API·OpenAI 호출을 줄입니다. 상세는 [cache/tutorial/README.md](./cache/tutorial/README.md) 참고.
 - **시장 뉴스 파일 캐시**: 코스피/코스닥 등 시장 키워드 뉴스는 종목과 무관하게 공유되므로 `cache/market-news/`에 시장별로 저장합니다. [cache/market-news/README.md](./cache/market-news/README.md)
 - **DART 일 캐시**: KST 날짜별 폴더에 공시·재무·원문 ZIP 등을 저장해 같은 날 DART 호출을 줄입니다. [cache/dart/daily/README.md](./cache/dart/daily/README.md)
+- **한화 WM 리서치(스크래핑)**: 기업·산업분석 목록 1페이지를 일 단위 파일 캐시 후 AI 입력·근거에 반영합니다. [cache/hanwha-research/README.md](./cache/hanwha-research/README.md)
 
 ## 기술 스택
 
@@ -54,6 +55,10 @@
 | `app.market-news-cache.enabled` | 시장 뉴스 파일 캐시 사용 여부 (기본 `true`). |
 | `app.dart-cache.directory` | DART 일 캐시 루트 (기본 `cache/dart/daily`). |
 | `app.dart-cache.enabled` | DART 일 캐시 사용 여부 (기본 `true`). |
+| `app.hanwha-research.enabled` | 한화 WM 리서치 수집·AI 반영 전체 스위치 (기본 `true`). |
+| `app.hanwha-research.cache-enabled` | 일 단위 파일 캐시 사용 (기본 `true`). |
+| `app.hanwha-research.cache-directory` | 리서치 캐시 디렉터리 (기본 `cache/hanwha-research`). |
+| `app.hanwha-research.list-url` | 스크래핑 대상 목록 URL. |
 
 캐시 적중 여부는 응답 헤더 `X-AIS-Tutorial-Cache`(값 `HIT` / `MISS`), 생성·만료 시각은 `X-AIS-Tutorial-Cache-Generated`, `X-AIS-Tutorial-Cache-Expires`(ISO-8601)로 확인할 수 있습니다.
 

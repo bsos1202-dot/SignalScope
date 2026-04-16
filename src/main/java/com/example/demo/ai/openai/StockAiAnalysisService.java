@@ -9,10 +9,14 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
 import com.example.demo.collect.dart.DartApiClient;
+import com.example.demo.collect.hanwha.HanwhaResearchListClient;
+import com.example.demo.collect.hanwha.cache.HanwhaResearchDailyCacheService;
+import com.example.demo.collect.hanwha.dto.HanwhaResearchListItem;
 import com.example.demo.collect.dart.cache.DartDailyFileCacheService;
 import com.example.demo.collect.dart.dto.DisclosureResponse;
 import com.example.demo.collect.dart.dto.FinancialResponse;
@@ -30,6 +34,7 @@ import com.example.demo.ai.dto.KisMarketMetrics;
 import com.example.demo.ai.dto.TutorialEvidence;
 import com.example.demo.ai.dto.TutorialEvidence.BoardRef;
 import com.example.demo.ai.dto.TutorialEvidence.DisclosureRef;
+import com.example.demo.ai.dto.TutorialEvidence.HanwhaResearchRef;
 import com.example.demo.ai.dto.TutorialEvidence.NewsRef;
 import com.example.demo.collect.news.GoogleNewsApiClient;
 import com.example.demo.collect.news.NaverNewsApiClient;
@@ -45,6 +50,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class StockAiAnalysisService {
 
+    @Value("${app.hanwha-research.enabled:true}")
+    private boolean hanwhaResearchEnabled;
+
     private final DartApiClient dartApiClient;
     private final DartDailyFileCacheService dartDailyFileCacheService;
     private final MarketNewsFileCacheService marketNewsFileCacheService;
@@ -54,6 +62,8 @@ public class StockAiAnalysisService {
     private final KisTokenManager kisTokenManager;
     private final OpenAiDirectClient openAiDirectClient;
     private final NaverStockBoardClient naverStockBoardClient;
+    private final HanwhaResearchListClient hanwhaResearchListClient;
+    private final HanwhaResearchDailyCacheService hanwhaResearchDailyCacheService;
 
     public AiTutorialResponse generateWhyApproachTutorial(String stockCode, String dartCode, String corpName, String market, String today) {
         log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작", corpName);
@@ -105,18 +115,19 @@ public class StockAiAnalysisService {
                 .collect(Collectors.toList());
         String parsedGoogleNews = String.join("\n", googleNewsList);
 
-        String marketNewsKeyword = (market != null && !market.isBlank()) ? (market.trim() + " 증시") : "";
+        String mktTrim = market == null ? "" : market.trim();
+        String marketNewsKeyword = mktTrim.isEmpty() ? "" : (mktTrim + " 증시");
         NaverNewsResponse naverMarketData = null;
         List<RssNewsItem> googleRssMarket = Collections.emptyList();
         if (!marketNewsKeyword.isBlank()) {
-            var marketCached = marketNewsFileCacheService.readIfValid(market.trim());
+            var marketCached = marketNewsFileCacheService.readIfValid(mktTrim);
             if (marketCached.isPresent()) {
                 naverMarketData = marketCached.get().naverMarket();
                 googleRssMarket = marketCached.get().googleMarket();
             } else {
                 naverMarketData = naverNewsApiClient.searchNews(marketNewsKeyword, 3);
-                googleRssMarket = googleNewsApiClient.searchNewsItems(market.trim(), 3);
-                marketNewsFileCacheService.put(market.trim(), naverMarketData, googleRssMarket);
+                googleRssMarket = googleNewsApiClient.searchNewsItems(mktTrim, 3);
+                marketNewsFileCacheService.put(mktTrim, naverMarketData, googleRssMarket);
             }
         }
         String parsedNaverNewsMarket = marketNewsKeyword.isBlank()
@@ -128,6 +139,13 @@ public class StockAiAnalysisService {
         String parsedGoogleNewsMarket = marketNewsKeyword.isBlank()
                 ? "(시장 구분 없음 — 시장 키워드 뉴스 생략)"
                 : String.join("\n", googleNewsListMarket);
+
+        List<HanwhaResearchListItem> hanwhaResearchItems = hanwhaResearchEnabled
+                ? hanwhaResearchDailyCacheService.getOrLoadToday(hanwhaResearchListClient::fetchFirstPage)
+                : List.of();
+        String parsedHanwhaResearch = hanwhaResearchEnabled
+                ? buildHanwhaResearchLlmBlock(hanwhaResearchItems)
+                : "(한화 WM 리서치 수집 비활성화)";
 
         // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑)
         List<StockBoardPost> boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
@@ -144,6 +162,8 @@ public class StockAiAnalysisService {
         log.info("[구글RSS] 뉴스 - " + parsedGoogleNews);
         log.info("[네이버API] 시장 키워드 뉴스 - {}", parsedNaverNewsMarket);
         log.info("[구글RSS] 시장 키워드 뉴스 - {}", parsedGoogleNewsMarket);
+        log.info("[한화WM 리서치] 목록 {}건 — {}", hanwhaResearchItems.size(),
+                hanwhaResearchEnabled ? "스냅샷 반영" : "비활성화");
         log.info("[네이버종목토론] 요약 - {}", boardSentimentHint);
 
         // 5. WHY Approach 시스템 프롬프트 조립
@@ -155,6 +175,7 @@ public class StockAiAnalysisService {
             제공된 '시장 참고 수치'를 먼저 짚어주고, 공시와 뉴스를 바탕으로 분위기와 배경을 인과관계로 설명하세요.
             PER·PBR·RSI·체결강도 등은 증권사 API가 준 참고 수치일 뿐이며, 투자의 정답이나 매수·매도 신호가 아님을 유의해 설명하세요.
             네이버 종목토론방 글은 개인 의견·감정에 가깝고 추천/비추천 수도 참고용입니다. 여론을 사실처럼 단정하지 말고, '커뮤니티에서는 이런 분위기가 보인다' 수준으로 짧게 언급하세요.
+            한화투자증권 WM '기업·산업분석' 목록은 웹에서 가져온 1페이지 스냅샷일 뿐이며, 해당 종목과 직접 관련이 없을 수 있습니다. 투자 권유나 매수·매도 의견이 아님을 밝히고, 제목·요약 수준만 배경 참고로 짧게 언급하세요.
             사용자가 스스로 시장을 이해하고 당사 MTS에 계속 머물며 학습하고 싶도록 작성해 주세요.
             """;
 
@@ -179,18 +200,24 @@ public class StockAiAnalysisService {
             8. 구글 RSS 뉴스(시장 키워드):
             %s
             
+            [증권사 리서치 — 한화투자증권 WM 기업·산업분석 목록 1페이지, 당일 캐시된 스크래핑 스냅샷]
+            9. 리서치 제목·요약(참고, 종목과 무관할 수 있음):
+            %s
+            
             [커뮤니티 반응 — 네이버 종목토론방 최신 글 5개]
-            9. 여론 요약(추천/비추천 합계 기반 참고): %s
+            10. 여론 요약(추천/비추천 합계 기반 참고): %s
             %s
             
             위 사실을 바탕으로:
             - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
             - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
+            - 한화 WM 리서치 목록이 오늘의 시장/섹터 분위기와 어떻게 겹쳐 보이는지 한 문장(해당 없으면 생략)?
             - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
             를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·%% 수치는 언급하지 말 것.)
             """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary,
                 ownershipSectionForPrompt(ownershipLlmBlock),
                 parsedNaverNews, parsedGoogleNews, parsedNaverNewsMarket, parsedGoogleNewsMarket,
+                parsedHanwhaResearch,
                 boardSentimentHint, parsedBoardPosts);
 
         String summary = openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
@@ -206,6 +233,7 @@ public class StockAiAnalysisService {
                 googleRssKeyword,
                 naverMarketData,
                 googleRssMarket,
+                hanwhaResearchItems,
                 boardPosts,
                 boardSentimentHint
         );
@@ -224,6 +252,7 @@ public class StockAiAnalysisService {
             List<RssNewsItem> googleRssKeyword,
             NaverNewsResponse naverMarketData,
             List<RssNewsItem> googleRssMarket,
+            List<HanwhaResearchListItem> hanwhaResearchItems,
             List<StockBoardPost> boardPosts,
             String boardSentimentHint
     ) {
@@ -239,9 +268,48 @@ public class StockAiAnalysisService {
                 toGoogleNewsRefs(googleRssKeyword),
                 toNaverNewsRefs(naverMarketData),
                 toGoogleNewsRefs(googleRssMarket),
+                toHanwhaResearchRefs(hanwhaResearchItems),
                 toBoardRefs(boardPosts),
                 boardSentimentHint
         );
+    }
+
+    private List<HanwhaResearchRef> toHanwhaResearchRefs(List<HanwhaResearchListItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        return items.stream()
+                .map(i -> new HanwhaResearchRef(
+                        i.title(),
+                        i.link() != null ? i.link() : "",
+                        i.category() != null ? i.category() : "",
+                        i.author() != null ? i.author() : "",
+                        i.publishedAt() != null ? i.publishedAt() : "",
+                        i.snippet() != null ? i.snippet() : ""
+                ))
+                .collect(Collectors.toList());
+    }
+
+    private static String buildHanwhaResearchLlmBlock(List<HanwhaResearchListItem> items) {
+        if (items == null || items.isEmpty()) {
+            return "(한화 WM 리서치 목록 없음 또는 수집 생략)";
+        }
+        return items.stream()
+                .limit(15)
+                .map(i -> "- [" + nullToEmpty(i.category()) + "] " + nullToEmpty(i.title())
+                        + " | " + truncate(nullToEmpty(i.snippet()), 220))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
+    }
+
+    private static String truncate(String s, int max) {
+        if (s.length() <= max) {
+            return s;
+        }
+        return s.substring(0, max) + "…";
     }
 
     private KisMarketMetrics buildKisMarketMetrics(
