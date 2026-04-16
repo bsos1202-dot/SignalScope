@@ -9,6 +9,7 @@
 - **종목 검색 UI** (`/search.html`): KOSPI/KOSDAQ 마스터 기반 자동완성, 선택 시 AI 튜토리얼 요청
 - **종목 목록 API**: 인메모리 캐시에서 전체 종목 JSON 제공
 - **AI 튜토리얼 API**: DART·한국투자증권 시세·뉴스·네이버 종목토론(스크래핑) 등을 조합해 텍스트 응답
+- **튜토리얼 파일 캐시**: 동일 6자리 종목에 대해 설정한 TTL(기본 10분) 안에서는 `cache/tutorial/{코드}.json`에 저장된 응답을 그대로 반환해 외부 API·OpenAI 호출을 줄입니다. 상세는 [cache/tutorial/README.md](./cache/tutorial/README.md) 참고.
 
 ## 기술 스택
 
@@ -39,6 +40,23 @@
 
 `.env`는 `.gitignore`에 포함되어 커밋되지 않습니다.
 
+### 튜토리얼 캐시 설정 (`application.properties`)
+
+| 키 | 설명 |
+|----|------|
+| `app.tutorial-cache.directory` | 캐시 JSON 저장 디렉터리 (기본 `cache/tutorial`). 컨테이너·NAS 마운트 경로로 바꾸는 것을 권장합니다. |
+| `app.tutorial-cache.ttl-minutes` | 같은 종목 재요청 시 디스크 캐시를 쓸 최대 유효 시간(분, 기본 `10`). |
+
+캐시 적중 여부는 응답 헤더 `X-AIS-Tutorial-Cache`(값 `HIT` / `MISS`), 생성·만료 시각은 `X-AIS-Tutorial-Cache-Generated`, `X-AIS-Tutorial-Cache-Expires`(ISO-8601)로 확인할 수 있습니다.
+
+### MTS·운영 관점 요약
+
+- **부하**: 인기 종목 반복 조회 시 OpenAI·KIS·DART 호출이 캐시로 대체되므로 비용·지연·Rate limit 압력이 줄어듭니다. TTL은 가격 민감도와 비용의 트레이드오프입니다.
+- **일관성**: 캐시된 본문은 스냅샷이므로, LLM 입력에서도 **등락률·현재가·52주 대비 %** 등은 제외하고 **거래량·대금·회전·체결강도·밸류·RSI·공시·뉴스** 위주로 분석하도록 설계했습니다.
+- **디스크**: 종목 수만큼 파일이 생길 수 있으므로 용량 모니터링·만료 파일 정리 배치·백업 정책에서 `app.tutorial-cache.directory` 경로를 포함하세요.
+- **무효화**: 긴급 시 해당 `{종목코드}.json`만 삭제하면 다음 요청에서 재수집합니다.
+- **다중 인스턴스**: 파일 캐시는 **노드 로컬**이므로 로드밸런서 뒤 여러 Pod면 종목별로 캐시 미스가 늘 수 있습니다. 공유 스토리지(NFS 등) 또는 Redis 같은 중앙 캐시로 확장하는 것이 일반적입니다.
+
 ## 실행 방법
 
 ```bash
@@ -56,7 +74,7 @@
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `/api/stocks/all` | 종목 목록(JSON) |
-| GET | `/ai/tutorial` | `corp_code`, `corp_name`, `market` 쿼리 — JSON: `summary`(LLM 본문), `evidence`(참조 공시·뉴스·종목토론 등) |
+| GET | `/ai/tutorial` | `corp_code`, `corp_name`, `market` 쿼리 — JSON: `summary`(LLM 본문), `evidence`(참조 공시·뉴스·종목토론 등). TTL 내 재요청 시 디스크 캐시 HIT 가능(헤더 `X-AIS-Tutorial-Cache`) |
 
 ## 문서
 

@@ -24,6 +24,7 @@ flowchart LR
   subgraph server [Spring Boot]
     SC[StockSearchController]
     AC[AiAnalysisController]
+    TFC[AiTutorialFileCacheService]
     SCS[StockCacheService]
     SAS[StockAiAnalysisService]
     COL[Collectors / Clients]
@@ -39,7 +40,8 @@ flowchart LR
   UI -->|GET /api/stocks/all| SC
   SC --> SCS
   UI -->|GET /ai/tutorial| AC
-  AC --> SAS
+  AC --> TFC
+  AC -->|MISS 시| SAS
   SAS --> COL
   COL --> KIS
   COL --> DART
@@ -63,16 +65,21 @@ flowchart LR
 | `collect.news` | 네이버 뉴스 API, 구글 뉴스(RSS 등) |
 | `collect.naverboard` | 네이버 금융 **종목토론 목록** HTML 파싱 (비공식) |
 | `ai.openai` | OpenAI 호출, 튜토리얼용 프롬프트 조립 |
+| `ai.cache` | 튜토리얼 응답 **파일 캐시** (`TutorialCacheFile`, `AiTutorialFileCacheService`) |
 | `ai.controller` | `/ai/tutorial` REST |
 
 ---
 
 ## 4. 핵심 데이터 흐름: AI 튜토리얼
 
+`AiAnalysisController`는 먼저 `AiTutorialFileCacheService.readIfValid(종목코드)`로 **디스크 캐시**를 조회한다.  
+유효한 `TutorialCacheFile`이 있으면 그 안의 `AiTutorialResponse`만 반환하고(응답 헤더 `X-AIS-Tutorial-Cache: HIT`), 없거나 만료되었으면 `StockAiAnalysisService.generateWhyApproachTutorial(...)`를 호출한 뒤 `put`으로 파일을 갱신한다(`MISS`).
+
 `StockAiAnalysisService.generateWhyApproachTutorial(...)` 가 단일 오케스트레이션 역할을 한다.
 
 1. **시세·지표 (KIS)**  
-   - `inquire-price`: 현재가·등락·거래량, PER/PBR/EPS/BPS, 거래량 회전율, 52주 고저 대비, 외국인 소진율 등.  
+   - `inquire-price` 등에서 **PER/PBR/EPS/BPS, 거래량·거래대금·회전, 외국인 소진율** 등을 활용한다.  
+   - **LLM 입력 문자열**에서는 등락률·현재가·52주 대비(%)처럼 짧은 TTL 캐시와 어긋나기 쉬운 수치는 넣지 않고, **거래량 맥락·체결·밸류·RSI** 위주로 요약한다(`buildKisLlmContext` 등).  
    - `inquire-investment-indicator`(TR FHKST01010900): RSI(`rsiv_val`) 등.  
    - `inquire-ccnl`(TR FHKST01010300): 시간대별 체결·**당일 체결강도**(`tday_rltv`) 등.  
    - 위 값을 `KisMarketMetrics`로 묶어 LLM 입력과 `evidence`에 반영.
@@ -88,10 +95,30 @@ flowchart LR
    - **추천·비추천 합**으로 거친 **긍·부정 힌트 문장**을 만든 뒤, LLM에 “참고용 여론”으로 전달.
 
 5. **LLM**  
-   - 시스템 프롬프트: 초보 대상 톤, 현재가 직접 노출 지양, **토론글은 개인 의견**임을 명시.  
+   - 시스템·유저 프롬프트: 초보 대상 톤, **등락률·현재가·몇 % 상승/하락·52주 대비 %** 표현 금지, **토론글은 개인 의견**임을 명시.  
    - 유저 프롬프트: 위 수집 문자열을 섹션별로 삽입 후 `OpenAiDirectClient`로 Chat Completions 요청.
 
-`/ai/tutorial` 응답은 **JSON** (`AiTutorialResponse`)이며, `summary`(LLM 본문)와 `evidence`(참조한 시세 문구·DART 공시·뉴스·종목토론 메타 등)를 함께 반환한다. 프론트(`search.html`)는 요약을 표시하고, `<details>`로 근거 목록을 접었다 펼칠 수 있다.
+`/ai/tutorial` 응답은 **JSON** (`AiTutorialResponse`)이며, `summary`(LLM 본문)와 `evidence`(참조한 시세 문구·DART 공시·뉴스·종목토론 메타 등)를 함께 반환한다. 프론트(`search.html`)는 요약을 표시하고, `<details>`로 근거 목록을 접었다 펼칠 수 있다. 캐시 HIT/MISS 안내는 응답 헤더와 짧은 문구로 표시한다.
+
+---
+
+## 4.1 AI 튜토리얼 파일 캐시 (운영)
+
+| 항목 | 설명 |
+|------|------|
+| 위치 | 기본 `cache/tutorial/{6자리코드}.json` (`app.tutorial-cache.directory`) |
+| 형식 | `TutorialCacheFile`: 버전, 메타, `createdAtMillis` / `expiresAtMillis`, 중첩 `AiTutorialResponse` |
+| TTL | `app.tutorial-cache.ttl-minutes`(기본 10). 만료 후 다음 요청에서 재수집·덮어쓰기. |
+| 쓰기 | 임시 파일에 직렬화 후 `Files.move`(원자 이동 미지원 시 copy+delete). |
+| HTTP | `X-AIS-Tutorial-Cache`, `X-AIS-Tutorial-Cache-Generated`, `X-AIS-Tutorial-Cache-Expires`(ISO-8601). |
+| Git | `*.json`은 `.gitignore`, 폴더 설명은 `cache/tutorial/README.md`만 추적. |
+
+**운영 포인트**
+
+- **수평 확장**: 로컬 디스크 캐시는 인스턴스마다 따로이므로, 트래픽이 여러 노드로 갈 경우 HIT율이 낮아질 수 있다. NFS 등 공유 볼륨 또는 Redis/캐시 게이트웨이 도입을 검토한다.  
+- **동시 MISS**: 동일 종목에 대한 동시 첫 요청은 모두 MISS가 될 수 있다. 필요 시 분산 락·singleflight 패턴으로 OpenAI 호출을 한 번으로 묶는다.  
+- **용량·정리**: 종목×파일 수가 늘어나므로 디스크 알람·만료 파일 배치 삭제·로그 로테이션과 함께 경로를 백업 정책에 명시한다.  
+- **무효화**: 특정 종목만 재분석하려면 해당 JSON 파일을 삭제한다.
 
 ---
 

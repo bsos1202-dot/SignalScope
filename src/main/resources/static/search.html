@@ -113,7 +113,7 @@
             return escapeHtml(text).replace(/\n/g, "<br>");
         }
 
-        function renderTutorialPayload(data) {
+        function renderTutorialPayload(data, cacheNote) {
             const summary = data.summary || "";
             const ev = data.evidence || {};
             const dDart = (ev.dartDisclosures || []).length;
@@ -125,6 +125,9 @@
             const newsTotal = nNaver + nGoog + nMkt;
 
             let html = '<div class="result-card">';
+            if (cacheNote) {
+                html += '<p class="muted" style="margin:0 0 12px 0;">' + escapeHtml(cacheNote) + "</p>";
+            }
             html += '<div class="summary-block">' + nl2brEscaped(summary) + "</div>";
 
             const km = ev.kisMarketMetrics;
@@ -327,7 +330,18 @@
                                 return;
                             }
 
-                            resultContainer.innerHTML = renderTutorialPayload(data);
+                            const cacheState = response.headers.get("X-AIS-Tutorial-Cache") || "";
+                            const cacheExp = response.headers.get("X-AIS-Tutorial-Cache-Expires") || "";
+                            let cacheNote = "";
+                            if (cacheState === "HIT") {
+                                cacheNote = "서버 파일 캐시에서 불러온 결과입니다. 실시간 등락·가격은 반영되지 않을 수 있습니다.";
+                                if (cacheExp) cacheNote += " 만료(UTC): " + cacheExp + ".";
+                            } else if (cacheState === "MISS") {
+                                cacheNote = "새로 분석한 결과입니다.";
+                                if (cacheExp) cacheNote += " 다음까지 캐시될 수 있음(UTC): " + cacheExp + ".";
+                            }
+
+                            resultContainer.innerHTML = renderTutorialPayload(data, cacheNote);
                             resultContainer.style.display = "block";
                         } catch (error) {
                             resultContainer.innerHTML = '<div class="result-card"><span style="color:red;">오류: 서버와 통신에 실패했거나 응답을 해석할 수 없습니다.</span></div>';

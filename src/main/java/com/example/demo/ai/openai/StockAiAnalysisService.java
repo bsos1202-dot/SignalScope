@@ -120,10 +120,10 @@ public class StockAiAnalysisService {
             당신은 주식 투자를 처음 시작하는 사람들에게 단기간 종목이 왜 움직였는지를 알려주는 가이드입니다.
             많은 사람들이 주식 가격이 왜 움직였는지 이해를 돕는 것이 우리의 가장 큰 목표입니다.
             사용자들은 지식의 편차가 심하므로, 전문 용어를 최대한 배제하고 쉽게 비유해서 설명해야 합니다.
-            제공된 '현재 주가 상황'을 먼저 짚어주고, 공시와 뉴스를 바탕으로 그 주가가 왜 그렇게 움직이고 있는지 인과관계를 설명하세요.
-            PER·PBR·RSI·체결강도·52주 대비 등은 증권사 API가 준 참고 수치일 뿐이며, 투자의 정답이나 매수·매도 신호가 아님을 유의해 설명하세요.
+            입력 데이터에는 등락률·현재가·52주 대비 등이 포함되어 있지 않습니다. **전일 대비 몇 % 올랐다/내렸다, 현재가, 52주 대비 몇 %** 같은 표현은 하지 마세요. 거래량·거래대금·회전율·체결강도·PER·RSI·공시·뉴스·토론 분위기 위주로 맥락을 설명하세요.
+            제공된 '시장 참고 수치'를 먼저 짚어주고, 공시와 뉴스를 바탕으로 분위기와 배경을 인과관계로 설명하세요.
+            PER·PBR·RSI·체결강도 등은 증권사 API가 준 참고 수치일 뿐이며, 투자의 정답이나 매수·매도 신호가 아님을 유의해 설명하세요.
             네이버 종목토론방 글은 개인 의견·감정에 가깝고 추천/비추천 수도 참고용입니다. 여론을 사실처럼 단정하지 말고, '커뮤니티에서는 이런 분위기가 보인다' 수준으로 짧게 언급하세요.
-            현재가는 민감한 정보이니 명시하지 않고 변동율만 노출해줘(인과관계 상 필요없다면 노출 안해도 되).
             사용자가 스스로 시장을 이해하고 당사 MTS에 계속 머물며 학습하고 싶도록 작성해 주세요.
             """;
 
@@ -150,10 +150,10 @@ public class StockAiAnalysisService {
             %s
             
             위 사실을 바탕으로:
-            - 지금 이 종목의 현재 가격과 분위기는 어떤 상태인지?
-            - 공시나 뉴스가 이 가격 움직임에 '왜' 영향을 주고 있는지?
+            - 거래 활발도(거래량·대금·회전·체결강도)와 밸류에이션 맥락은 어떤가?
+            - 공시나 뉴스가 시장 분위기에 어떤 배경을 주고 있는가?
             - 네이버 종목토론방에서는 긍정/부정적 반응이 어떻게 보이는지 한 문장으로?
-            를 3~4줄로 쉽게 설명해 줘.
+            를 3~4줄로 쉽게 설명해 줘. (등락률·현재가·% 수치는 언급하지 말 것.)
             """, parsedStockStatus, parsedDisclosures, parsedFinancials, documentSummary, parsedNaverNews, parsedGoogleNews, parsedGoogleNewsMarket, boardSentimentHint, parsedBoardPosts);
 
         String summary = openAiDirectClient.requestChatCompletion(systemPrompt, userPrompt);
@@ -209,7 +209,7 @@ public class StockAiAnalysisService {
             KisInvestmentIndicatorResponse invest,
             KisCcnlResponse ccnl
     ) {
-        String headline = extractStockStatus(price);
+        String headline = extractStockStatusHeadline(price);
         if (price == null || price.output() == null) {
             return new KisMarketMetrics(headline, "", "", "", "", "", "", "", "", "", "", "", headline);
         }
@@ -229,7 +229,7 @@ public class StockAiAnalysisService {
                 stTime = row.contractHour().trim();
             }
         }
-        String block = buildKisLlmContext(headline, o, rsi, strength, stTime);
+        String block = buildKisLlmContext(o, rsi, strength, stTime);
         return new KisMarketMetrics(
                 headline,
                 nz(o.per()),
@@ -238,8 +238,8 @@ public class StockAiAnalysisService {
                 nz(o.bps()),
                 rsi,
                 nz(o.volumeTurnoverRate()),
-                nz(o.w52HighVsCurrentPct()),
-                nz(o.w52LowVsCurrentPct()),
+                "",
+                "",
                 nz(o.foreignHoldingRatio()),
                 strength,
                 stTime,
@@ -258,15 +258,20 @@ public class StockAiAnalysisService {
         sb.append("\n- ").append(label).append(": ").append(value.trim());
     }
 
-    private String buildKisLlmContext(String headline, Output o, String rsi, String strength, String stTime) {
-        StringBuilder sb = new StringBuilder(headline);
+    /**
+     * LLM 입력용: 등락률·현재가·52주 대비(%) 등 실시간 변동 큰 수치는 제외하고, 거래량·회전·밸류·RSI·체결강도 중심.
+     */
+    private String buildKisLlmContext(Output o, String rsi, String strength, String stTime) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("한국투자증권 기준 요약(등락률·현재가·52주 대비율은 변동·지연이 커 본 분석에는 포함하지 않음):");
+        appendKisMetric(sb, "당일 누적 거래량(주)", o.volume());
+        appendKisMetric(sb, "누적 거래대금(원)", o.accumulatedTradeAmount());
+        appendKisMetric(sb, "전일 대비 거래량 비율(%)", o.volumeVsPrevDayRate());
+        appendKisMetric(sb, "거래량 회전율(%)", o.volumeTurnoverRate());
         appendKisMetric(sb, "PER", o.per());
         appendKisMetric(sb, "PBR", o.pbr());
         appendKisMetric(sb, "EPS", o.eps());
         appendKisMetric(sb, "BPS", o.bps());
-        appendKisMetric(sb, "거래량 회전율(%)", o.volumeTurnoverRate());
-        appendKisMetric(sb, "52주 최고가 대비 현재가(%)", o.w52HighVsCurrentPct());
-        appendKisMetric(sb, "52주 최저가 대비 현재가(%)", o.w52LowVsCurrentPct());
         appendKisMetric(sb, "외국인 소진율(%)", o.foreignHoldingRatio());
         if (!rsi.isBlank()) {
             sb.append("\n- RSI(상대강도지수): ").append(rsi);
@@ -367,14 +372,22 @@ public class StockAiAnalysisService {
 
     // --- 데이터 추출 헬퍼 메서드들 ---
 
-    private String extractStockStatus(KisStockResponse data) {
+    /**
+     * UI·근거 카드용: 등락률·현재가 없이 거래량·대금 중심 (캐시·지연 시 혼동 방지).
+     */
+    private String extractStockStatusHeadline(KisStockResponse data) {
         if (data == null || data.output() == null) {
             return "- 현재 시세 정보를 불러올 수 없습니다.";
         }
-        String price = formatNumber(data.output().currentPrice());
-        String rate = data.output().changeRate();
         String volume = formatNumber(data.output().volume());
-        return String.format("현재가 %s원 (전일 대비 %s%% 변동), 오늘 거래량은 %s주 입니다.", price, rate, volume);
+        String pbmn = formatNumber(data.output().accumulatedTradeAmount());
+        StringBuilder sb = new StringBuilder();
+        sb.append("당일 누적 거래량 약 ").append(volume).append("주");
+        if (pbmn != null && !pbmn.isBlank() && !"0".equals(pbmn.replace(",", ""))) {
+            sb.append(", 누적 거래대금 약 ").append(pbmn).append("원");
+        }
+        sb.append(". (등락률·현재가는 실시간 변동이 커 요약·AI 입력에서는 제외)");
+        return sb.toString();
     }
 
     private String extractDisclosures(DisclosureResponse data) {

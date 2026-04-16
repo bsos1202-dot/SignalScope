@@ -1,16 +1,21 @@
 package com.example.demo.ai.controller;
 
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.Optional;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.ai.cache.AiTutorialFileCacheService;
+import com.example.demo.ai.cache.dto.TutorialCacheFile;
 import com.example.demo.ai.dto.AiTutorialResponse;
 import com.example.demo.ai.openai.StockAiAnalysisService;
 import com.example.demo.collect.dart.DartCorpCodeManager;
@@ -25,6 +30,7 @@ public class AiAnalysisController {
 
     private final StockAiAnalysisService aiAnalysisService;
     private final DartCorpCodeManager dartCorpCodeManager;
+    private final AiTutorialFileCacheService tutorialFileCacheService;
 
     /**
      * AI 기반 WHY Approach 종목 튜토리얼 생성 API
@@ -49,8 +55,25 @@ public class AiAnalysisController {
 
         String today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
 
-        AiTutorialResponse report = aiAnalysisService.generateWhyApproachTutorial(stockCode, dartCode, corpName, market, today);
+        Optional<TutorialCacheFile> cached = tutorialFileCacheService.readIfValid(stockCode.trim());
+        if (cached.isPresent()) {
+            TutorialCacheFile envelope = cached.get();
+            HttpHeaders headers = new HttpHeaders();
+            headers.add("X-AIS-Tutorial-Cache", "HIT");
+            headers.add("X-AIS-Tutorial-Cache-Expires", Instant.ofEpochMilli(envelope.expiresAtMillis()).toString());
+            headers.add("X-AIS-Tutorial-Cache-Generated", Instant.ofEpochMilli(envelope.createdAtMillis()).toString());
+            return ResponseEntity.ok().headers(headers).body(envelope.response());
+        }
 
-        return ResponseEntity.ok(report);
+        AiTutorialResponse report = aiAnalysisService.generateWhyApproachTutorial(stockCode, dartCode, corpName, market, today);
+        tutorialFileCacheService.put(stockCode.trim(), corpName, market, report);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("X-AIS-Tutorial-Cache", "MISS");
+        long expiresAt = System.currentTimeMillis() + tutorialFileCacheService.getTtlMinutes() * 60_000L;
+        headers.add("X-AIS-Tutorial-Cache-Expires", Instant.ofEpochMilli(expiresAt).toString());
+        headers.add("X-AIS-Tutorial-Cache-Generated", Instant.now().toString());
+
+        return ResponseEntity.ok().headers(headers).body(report);
     }
 }
