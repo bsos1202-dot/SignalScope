@@ -9,6 +9,7 @@ import java.util.Optional;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -49,9 +50,31 @@ public class AiAnalysisController {
 
         // 1. 6자리 주식 코드로 8자리 DART 고유번호 매핑
         String dartCode = dartCorpCodeManager.getDartCode(stockCode);
+        if (dartCode == null && dartCorpCodeManager.isLoadingInProgress()) {
+            // 초기 warm-up 시점의 첫 요청은 잠시 대기 후 재조회하여 오탐 400을 줄입니다.
+            for (int i = 0; i < 20; i++) { // 최대 약 2초
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                dartCode = dartCorpCodeManager.getDartCode(stockCode);
+                if (dartCode != null) {
+                    break;
+                }
+                if (!dartCorpCodeManager.isLoadingInProgress()) {
+                    break;
+                }
+            }
+        }
         
         if (dartCode == null) {
             log.warn("DART 코드 미매핑 - 종목코드 {}, 로딩상태 {}", stockCode, dartCorpCodeManager.getLoadingStatusSummary());
+            if (dartCorpCodeManager.isLoadingInProgress()) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                        "error", "DART 종목코드 초기화가 진행 중입니다. 잠시 후 다시 시도해 주세요."));
+            }
             return ResponseEntity.badRequest().body(Map.of(
                     "error", "DART 공시 조회가 지원되지 않는 비상장 종목이거나 코드가 잘못되었습니다."));
         }

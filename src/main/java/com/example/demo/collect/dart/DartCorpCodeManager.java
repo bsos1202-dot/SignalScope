@@ -55,7 +55,12 @@ public class DartCorpCodeManager {
     }
 
     private void loadDartCorpCodes() {
+        boolean loadedSuccessfully = false;
         try {
+            if (dartApiKey == null || dartApiKey.isBlank()) {
+                log.error("DART API 키가 비어 있어 corpCode 로딩을 수행할 수 없습니다.");
+                return;
+            }
             String url = "https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=" + dartApiKey;
             byte[] zipData = restTemplate.getForObject(url, byte[].class);
 
@@ -77,15 +82,18 @@ public class DartCorpCodeManager {
 
                     // 추출한 XML 파싱
                     parseCorpCodeXml(bos.toByteArray());
+                    loadedSuccessfully = true;
                 }
             }
         } catch (Exception e) {
             log.error("DART 고유번호 맵핑 파일 수집 실패", e);
         } finally {
-            if (loadingCompleted.get()) {
+            if (loadedSuccessfully && loadingCompleted.get()) {
                 log.info("DART 고유번호 로딩 최종 상태: {}", getLoadingStatusSummary());
             } else {
                 log.warn("DART 고유번호 로딩이 완료되지 않았습니다. 현재 상태: {}", getLoadingStatusSummary());
+                // 실패/중단 시 다음 요청에서 재시도할 수 있도록 시작 플래그를 되돌립니다.
+                loadingStarted.set(false);
             }
         }
     }
@@ -131,6 +139,10 @@ public class DartCorpCodeManager {
             log.warn("DART 매핑 로딩 중 요청 유입 - 종목코드 {}, 상태: {}", stockCode, getLoadingStatusSummary());
         }
         return result;
+    }
+
+    public boolean isLoadingInProgress() {
+        return loadingStarted.get() && !loadingCompleted.get();
     }
 
     public String getLoadingStatusSummary() {
