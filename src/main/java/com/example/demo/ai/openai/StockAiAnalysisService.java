@@ -5,10 +5,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
@@ -41,13 +44,12 @@ import com.example.demo.collect.news.NaverNewsApiClient;
 import com.example.demo.collect.news.cache.MarketNewsFileCacheService;
 import com.example.demo.collect.news.dto.NaverNewsResponse;
 import com.example.demo.collect.news.dto.RssNewsItem;
+import com.example.demo.config.TutorialFetchAsyncConfig;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class StockAiAnalysisService {
 
     @Value("${app.hanwha-research.enabled:true}")
@@ -77,6 +79,36 @@ public class StockAiAnalysisService {
     private final HanwhaResearchListClient hanwhaResearchListClient;
     private final HanwhaResearchDailyCacheService hanwhaResearchDailyCacheService;
 
+    private final Executor tutorialFetchExecutor;
+
+    public StockAiAnalysisService(
+            DartApiClient dartApiClient,
+            DartDailyFileCacheService dartDailyFileCacheService,
+            MarketNewsFileCacheService marketNewsFileCacheService,
+            NaverNewsApiClient naverNewsApiClient,
+            GoogleNewsApiClient googleNewsApiClient,
+            KisStockApiClient kisStockApiClient,
+            KisTokenManager kisTokenManager,
+            OpenAiDirectClient openAiDirectClient,
+            NaverStockBoardClient naverStockBoardClient,
+            HanwhaResearchListClient hanwhaResearchListClient,
+            HanwhaResearchDailyCacheService hanwhaResearchDailyCacheService,
+            @Qualifier(TutorialFetchAsyncConfig.TUTORIAL_FETCH_EXECUTOR) Executor tutorialFetchExecutor
+    ) {
+        this.dartApiClient = dartApiClient;
+        this.dartDailyFileCacheService = dartDailyFileCacheService;
+        this.marketNewsFileCacheService = marketNewsFileCacheService;
+        this.naverNewsApiClient = naverNewsApiClient;
+        this.googleNewsApiClient = googleNewsApiClient;
+        this.kisStockApiClient = kisStockApiClient;
+        this.kisTokenManager = kisTokenManager;
+        this.openAiDirectClient = openAiDirectClient;
+        this.naverStockBoardClient = naverStockBoardClient;
+        this.hanwhaResearchListClient = hanwhaResearchListClient;
+        this.hanwhaResearchDailyCacheService = hanwhaResearchDailyCacheService;
+        this.tutorialFetchExecutor = tutorialFetchExecutor;
+    }
+
     public AiTutorialResponse generateWhyApproachTutorial(
             String stockCode,
             String dartCode,
@@ -87,72 +119,82 @@ public class StockAiAnalysisService {
     ) {
         log.info("{} 종목에 대한 실시간 AI 튜토리얼 분석 시작 (naverBoard={})", corpName, naverBoardScrapeEnabled);
 
-        // 1. 시장 현재 상태 수집 (한국투자증권 — 거래량·밸류·RSI·체결강도 등; LLM 입력에서는 등락·가격·52주% 제외)
         String validAccessToken = kisTokenManager.getAccessToken();
-        KisStockResponse stockData = kisStockApiClient.getCurrentPrice(stockCode, validAccessToken);
-        KisInvestmentIndicatorResponse kisInvest = kisStockApiClient.getInvestmentIndicator(stockCode, validAccessToken);
-        KisCcnlResponse kisCcnl = kisStockApiClient.getTimeConclusion(stockCode, validAccessToken);
-        KisMarketMetrics kisMetrics = buildKisMarketMetrics(stockData, kisInvest, kisCcnl);
+        String newsKeyword = corpName + " 주식";
+        int naverStockN = clampDisplayCount(naverNewsStockDisplayCount, 1, 100);
+        int googleStockN = clampDisplayCount(googleNewsStockDisplayCount, 1, 50);
+        String mktTrim = market == null ? "" : market.trim();
+        String marketNewsKeyword = mktTrim.isEmpty() ? "" : (mktTrim + " 증시");
+        int naverMktN = clampDisplayCount(naverNewsMarketDisplayCount, 1, 100);
+        int googleMktN = clampDisplayCount(googleNewsMarketDisplayCount, 1, 50);
+        String code6 = stockCode != null ? stockCode.trim() : "";
+
+        CompletableFuture<KisMarketMetrics> kisFuture = CompletableFuture.supplyAsync(
+                () -> fetchKisMetricsParallel(stockCode, validAccessToken),
+                tutorialFetchExecutor);
+
+        CompletableFuture<DartCollectResult> dartFuture = CompletableFuture.supplyAsync(
+                () -> loadDartCollectParallel(dartCode, today),
+                tutorialFetchExecutor);
+
+        CompletableFuture<NaverNewsResponse> naverStockFuture = CompletableFuture.supplyAsync(
+                () -> naverNewsApiClient.searchNews(newsKeyword, naverStockN),
+                tutorialFetchExecutor);
+
+        CompletableFuture<List<RssNewsItem>> googleStockFuture = CompletableFuture.supplyAsync(
+                () -> googleNewsApiClient.searchNewsItems(newsKeyword, googleStockN),
+                tutorialFetchExecutor);
+
+        CompletableFuture<MarketNewsPair> marketFuture = CompletableFuture.supplyAsync(
+                () -> loadMarketNewsParallel(mktTrim, marketNewsKeyword, naverMktN, googleMktN),
+                tutorialFetchExecutor);
+
+        CompletableFuture<List<HanwhaResearchListItem>> hanwhaFuture = CompletableFuture.supplyAsync(
+                () -> hanwhaResearchEnabled
+                        ? hanwhaResearchDailyCacheService.getOrLoadToday(hanwhaResearchListClient::fetchFirstPage)
+                        : List.of(),
+                tutorialFetchExecutor);
+
+        CompletableFuture<BoardScrapeResult> boardFuture = CompletableFuture.supplyAsync(
+                () -> scrapeBoardParallel(stockCode, naverBoardScrapeEnabled),
+                tutorialFetchExecutor);
+
+        CompletableFuture.allOf(
+                kisFuture,
+                dartFuture,
+                naverStockFuture,
+                googleStockFuture,
+                marketFuture,
+                hanwhaFuture,
+                boardFuture
+        ).join();
+
+        KisMarketMetrics kisMetrics = kisFuture.join();
         String parsedStockStatus = kisMetrics.llmContextBlock();
 
-        // 2. 팩트 데이터 수집 (DART — KST 일자별 파일 캐시로 동일 일 재호출 최소화)
-        DisclosureResponse disclosureData = dartDailyFileCacheService.loadDisclosureList(
-                dartCode, today, today, "1", "10",
-                () -> dartApiClient.searchDisclosures(dartCode, today, today, "1", "10"));
-        FinancialResponse financialData = dartDailyFileCacheService.loadFinancial(
-                dartCode, "2023", "11011",
-                () -> dartApiClient.getFinancialInfo(dartCode, "2023", "11011"));
-        OwnershipResponse ownershipData = dartDailyFileCacheService.loadOwnership(
-                dartCode, () -> dartApiClient.getOwnershipDisclosures(dartCode));
-        DisclosureResponse majorIssuesData = dartDailyFileCacheService.loadMajorIssues(
-                dartCode, today, today,
-                () -> dartApiClient.getMajorManagementIssues(dartCode, today, today));
-
-        // 공시 상세 원문(ZIP) 수집 및 텍스트 파싱
-        String documentSummary = "최신 원문 없음";
-        if (disclosureData != null && disclosureData.list() != null && !disclosureData.list().isEmpty()) {
-            String rceptNo = disclosureData.list().get(0).rceptNo();
-            byte[] zipData = dartDailyFileCacheService.loadDisclosureDocument(
-                    rceptNo, () -> dartApiClient.getDisclosureDocument(rceptNo));
-            documentSummary = extractTextFromZip(zipData);
-        }
+        DartCollectResult dart = dartFuture.join();
+        DisclosureResponse disclosureData = dart.disclosureData();
+        FinancialResponse financialData = dart.financialData();
+        OwnershipResponse ownershipData = dart.ownershipData();
+        DisclosureResponse majorIssuesData = dart.majorIssuesData();
+        String documentSummary = dart.documentSummary();
 
         String parsedDisclosures = extractDisclosures(disclosureData);
         String parsedFinancials = extractFinancials(financialData);
         String ownershipLlmBlock = buildOwnershipLlmBlock(ownershipData);
-        String parsedMajorIssues = extractDisclosures(majorIssuesData); // 재사용
+        String parsedMajorIssues = extractDisclosures(majorIssuesData);
 
-        // 3. 시장 반응 데이터 수집 (멀티 채널 뉴스 - 종목명 기반 검색)
-        String newsKeyword = corpName + " 주식";
-        
-        int naverStockN = clampDisplayCount(naverNewsStockDisplayCount, 1, 100);
-        int googleStockN = clampDisplayCount(googleNewsStockDisplayCount, 1, 50);
-        NaverNewsResponse naverData = naverNewsApiClient.searchNews(newsKeyword, naverStockN);
+        NaverNewsResponse naverData = naverStockFuture.join();
+        List<RssNewsItem> googleRssKeyword = googleStockFuture.join();
         String parsedNaverNews = extractNaverNews(naverData);
-        
-        List<RssNewsItem> googleRssKeyword = googleNewsApiClient.searchNewsItems(newsKeyword, googleStockN);
         List<String> googleNewsList = googleRssKeyword.stream()
                 .map(i -> "- [구글] " + i.title() + " (" + i.pubDate() + ")")
                 .collect(Collectors.toList());
         String parsedGoogleNews = String.join("\n", googleNewsList);
 
-        String mktTrim = market == null ? "" : market.trim();
-        String marketNewsKeyword = mktTrim.isEmpty() ? "" : (mktTrim + " 증시");
-        NaverNewsResponse naverMarketData = null;
-        List<RssNewsItem> googleRssMarket = Collections.emptyList();
-        if (!marketNewsKeyword.isBlank()) {
-            var marketCached = marketNewsFileCacheService.readIfValid(mktTrim);
-            if (marketCached.isPresent()) {
-                naverMarketData = marketCached.get().naverMarket();
-                googleRssMarket = marketCached.get().googleMarket();
-            } else {
-                int naverMktN = clampDisplayCount(naverNewsMarketDisplayCount, 1, 100);
-                int googleMktN = clampDisplayCount(googleNewsMarketDisplayCount, 1, 50);
-                naverMarketData = naverNewsApiClient.searchNews(marketNewsKeyword, naverMktN);
-                googleRssMarket = googleNewsApiClient.searchNewsItems(mktTrim, googleMktN);
-                marketNewsFileCacheService.put(mktTrim, naverMarketData, googleRssMarket);
-            }
-        }
+        MarketNewsPair marketPair = marketFuture.join();
+        NaverNewsResponse naverMarketData = marketPair.naverMarket();
+        List<RssNewsItem> googleRssMarket = marketPair.googleMarket();
         String parsedNaverNewsMarket = marketNewsKeyword.isBlank()
                 ? "(시장 구분 없음 — 시장 키워드 뉴스 생략)"
                 : extractNaverNews(naverMarketData);
@@ -163,26 +205,16 @@ public class StockAiAnalysisService {
                 ? "(시장 구분 없음 — 시장 키워드 뉴스 생략)"
                 : String.join("\n", googleNewsListMarket);
 
-        List<HanwhaResearchListItem> hanwhaResearchItems = hanwhaResearchEnabled
-                ? hanwhaResearchDailyCacheService.getOrLoadToday(hanwhaResearchListClient::fetchFirstPage)
-                : List.of();
-        String code6 = stockCode != null ? stockCode.trim() : "";
+        List<HanwhaResearchListItem> hanwhaResearchItems = hanwhaFuture.join();
         List<HanwhaResearchListItem> hanwhaResearchForStock = hanwhaResearchEnabled
                 ? filterHanwhaItemsMatchingStockCode(code6, hanwhaResearchItems)
                 : List.of();
 
-        // 4. 네이버 종목토론방 최신 글 (비공식 HTML 스크래핑 — 요청에서 끌 수 있음)
-        List<StockBoardPost> boardPosts;
-        String parsedBoardPosts;
-        String boardSentimentHint;
-        if (naverBoardScrapeEnabled) {
-            boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
-            parsedBoardPosts = formatNaverBoardPosts(boardPosts);
-            boardSentimentHint = summarizeBoardSentiment(boardPosts);
-        } else {
-            boardPosts = List.of();
-            parsedBoardPosts = "(네이버 종목토론방 수집 생략 — 요청에서 제외)";
-            boardSentimentHint = "";
+        BoardScrapeResult boardResult = boardFuture.join();
+        List<StockBoardPost> boardPosts = boardResult.posts();
+        String parsedBoardPosts = boardResult.parsedPosts();
+        String boardSentimentHint = boardResult.sentimentHint();
+        if (!naverBoardScrapeEnabled) {
             log.info("[네이버종목토론] 사용자 설정으로 스크래핑 생략");
         }
 
@@ -394,6 +426,101 @@ public class StockAiAnalysisService {
             return max;
         }
         return value;
+    }
+
+    private KisMarketMetrics fetchKisMetricsParallel(String stockCode, String token) {
+        try {
+            CompletableFuture<KisStockResponse> priceF = CompletableFuture.supplyAsync(
+                    () -> kisStockApiClient.getCurrentPrice(stockCode, token),
+                    tutorialFetchExecutor);
+            CompletableFuture<KisInvestmentIndicatorResponse> investF = CompletableFuture.supplyAsync(
+                    () -> kisStockApiClient.getInvestmentIndicator(stockCode, token),
+                    tutorialFetchExecutor);
+            CompletableFuture<KisCcnlResponse> ccnlF = CompletableFuture.supplyAsync(
+                    () -> kisStockApiClient.getTimeConclusion(stockCode, token),
+                    tutorialFetchExecutor);
+            CompletableFuture.allOf(priceF, investF, ccnlF).join();
+            return buildKisMarketMetrics(priceF.join(), investF.join(), ccnlF.join());
+        } catch (Exception e) {
+            log.warn("[KIS] 병렬 수집 실패, 기본값 사용: {}", e.getMessage());
+            return buildKisMarketMetrics(null, null, null);
+        }
+    }
+
+    private DartCollectResult loadDartCollectParallel(String dartCode, String today) {
+        CompletableFuture<DisclosureResponse> discF = CompletableFuture.supplyAsync(
+                () -> dartDailyFileCacheService.loadDisclosureList(
+                        dartCode, today, today, "1", "10",
+                        () -> dartApiClient.searchDisclosures(dartCode, today, today, "1", "10")),
+                tutorialFetchExecutor);
+        CompletableFuture<FinancialResponse> finF = CompletableFuture.supplyAsync(
+                () -> dartDailyFileCacheService.loadFinancial(
+                        dartCode, "2023", "11011",
+                        () -> dartApiClient.getFinancialInfo(dartCode, "2023", "11011")),
+                tutorialFetchExecutor);
+        CompletableFuture<OwnershipResponse> ownF = CompletableFuture.supplyAsync(
+                () -> dartDailyFileCacheService.loadOwnership(
+                        dartCode, () -> dartApiClient.getOwnershipDisclosures(dartCode)),
+                tutorialFetchExecutor);
+        CompletableFuture<DisclosureResponse> majF = CompletableFuture.supplyAsync(
+                () -> dartDailyFileCacheService.loadMajorIssues(
+                        dartCode, today, today,
+                        () -> dartApiClient.getMajorManagementIssues(dartCode, today, today)),
+                tutorialFetchExecutor);
+        CompletableFuture.allOf(discF, finF, ownF, majF).join();
+
+        DisclosureResponse disclosureData = discF.join();
+        FinancialResponse financialData = finF.join();
+        OwnershipResponse ownershipData = ownF.join();
+        DisclosureResponse majorIssuesData = majF.join();
+
+        String documentSummary = "최신 원문 없음";
+        if (disclosureData != null && disclosureData.list() != null && !disclosureData.list().isEmpty()) {
+            String rceptNo = disclosureData.list().get(0).rceptNo();
+            byte[] zipData = dartDailyFileCacheService.loadDisclosureDocument(
+                    rceptNo, () -> dartApiClient.getDisclosureDocument(rceptNo));
+            documentSummary = extractTextFromZip(zipData);
+        }
+        return new DartCollectResult(disclosureData, financialData, ownershipData, majorIssuesData, documentSummary);
+    }
+
+    private MarketNewsPair loadMarketNewsParallel(
+            String mktTrim,
+            String marketNewsKeyword,
+            int naverMktN,
+            int googleMktN
+    ) {
+        if (marketNewsKeyword.isBlank()) {
+            return new MarketNewsPair(null, Collections.emptyList());
+        }
+        var marketCached = marketNewsFileCacheService.readIfValid(mktTrim);
+        if (marketCached.isPresent()) {
+            return new MarketNewsPair(marketCached.get().naverMarket(), marketCached.get().googleMarket());
+        }
+        CompletableFuture<NaverNewsResponse> naverF = CompletableFuture.supplyAsync(
+                () -> naverNewsApiClient.searchNews(marketNewsKeyword, naverMktN),
+                tutorialFetchExecutor);
+        CompletableFuture<List<RssNewsItem>> googleF = CompletableFuture.supplyAsync(
+                () -> googleNewsApiClient.searchNewsItems(mktTrim, googleMktN),
+                tutorialFetchExecutor);
+        CompletableFuture.allOf(naverF, googleF).join();
+        NaverNewsResponse naverMarketData = naverF.join();
+        List<RssNewsItem> googleRssMarket = googleF.join();
+        marketNewsFileCacheService.put(mktTrim, naverMarketData, googleRssMarket);
+        return new MarketNewsPair(naverMarketData, googleRssMarket);
+    }
+
+    private BoardScrapeResult scrapeBoardParallel(String stockCode, boolean naverBoardScrapeEnabled) {
+        if (!naverBoardScrapeEnabled) {
+            return new BoardScrapeResult(
+                    List.of(),
+                    "(네이버 종목토론방 수집 생략 — 요청에서 제외)",
+                    "");
+        }
+        List<StockBoardPost> boardPosts = naverStockBoardClient.fetchLatestPosts(stockCode, 5);
+        String parsedBoardPosts = formatNaverBoardPosts(boardPosts);
+        String boardSentimentHint = summarizeBoardSentiment(boardPosts);
+        return new BoardScrapeResult(boardPosts, parsedBoardPosts, boardSentimentHint);
     }
 
     private TutorialEvidence buildTutorialEvidence(
@@ -816,5 +943,24 @@ public class StockAiAnalysisService {
         } catch (NumberFormatException e) {
             return numberStr;
         }
+    }
+
+    private record DartCollectResult(
+            DisclosureResponse disclosureData,
+            FinancialResponse financialData,
+            OwnershipResponse ownershipData,
+            DisclosureResponse majorIssuesData,
+            String documentSummary
+    ) {
+    }
+
+    private record MarketNewsPair(NaverNewsResponse naverMarket, List<RssNewsItem> googleMarket) {
+    }
+
+    private record BoardScrapeResult(
+            List<StockBoardPost> posts,
+            String parsedPosts,
+            String sentimentHint
+    ) {
     }
 }

@@ -5,7 +5,7 @@
 ## 파일 형식
 
 - 파일명: `{종목코드}.json` (예: `005930.json`)
-- 내용: `TutorialCacheFile` — `version`, `stockCode`, `corpName`, `market`, `createdAtMillis`, `expiresAtMillis`, `response` (`AiTutorialResponse`)
+- 내용: `TutorialCacheFile` — `version`, `stockCode`, `corpName`, `market`, `createdAtMillis`, `expiresAtMillis`, `response` (`AiTutorialResponse`). `version`이 서버의 `CURRENT_VERSION`과 다르면 HIT하지 않고 재수집합니다(응답 스키마 변경 시).
 
 ## 운영 시 유의사항
 

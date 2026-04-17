@@ -83,12 +83,34 @@
             overflow-y: auto;
         }
         .muted { color: #888; font-size: 0.8rem; }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 12px 0 16px 0;
+            padding: 10px 12px;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 0.92rem;
+            color: #444;
+        }
+        .toggle-row label { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 10px; }
+        .toggle-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0056b3; }
     </style>
 </head>
 <body>
 
     <h2 style="color: #333;">어떤 종목이 궁금하신가요?</h2>
     <p style="color: #666;">종목을 선택하시면 주가가 움직이는 이유(WHY)를 쉽게 설명해 드립니다. 아래에서 참조한 공시·뉴스·종목토론을 펼쳐 볼 수 있습니다.</p>
+
+    <div class="toggle-row">
+        <label for="naverBoardToggle">
+            <input type="checkbox" id="naverBoardToggle" checked>
+            <span><strong>커뮤니티(네이버 종목토론)</strong> — 켜면 토론방을 스크랩해 AI 분석에 포함하고, 끄면 스크랩하지 않으며 시세·공시·뉴스·리서치만으로 분석합니다.</span>
+        </label>
+    </div>
 
     <div class="search-container">
         <input type="text" id="searchInput" placeholder="종목명 입력 (예: 삼성)" autocomplete="off">
@@ -150,7 +172,7 @@
             html += '<span class="chip">DART 공시 ' + dDart + "건</span>";
             html += '<span class="chip">주요 공시 ' + dMajor + "건</span>";
             html += '<span class="chip">뉴스 참조 ' + newsTotal + "건</span>";
-            html += '<span class="chip">한화 WM 리서치 ' + nHanwha + "건</span>";
+            html += '<span class="chip">한화 WM 리서치(종목코드 매칭) ' + nHanwha + "건</span>";
             html += '<span class="chip">종목토론 ' + nBoard + "건</span>";
             html += "</div></div>";
 
@@ -268,7 +290,7 @@
             }
 
             if (nHanwha > 0) {
-                html += '<div class="evidence-section"><h4>한화투자증권 WM — 기업·산업분석 (목록 1페이지 스냅샷)</h4><ul>';
+                html += '<div class="evidence-section"><h4>한화투자증권 WM — 기업·산업분석 (당일 1페이지 중 해당 종목코드가 제목·요약·URL에 포함된 항목)</h4><ul>';
                 (ev.hanwhaResearch || []).forEach(function (r) {
                     let t = escapeHtml(r.title || "");
                     if (r.link) {
@@ -311,6 +333,16 @@
             const list = document.getElementById("autoCompleteList");
             const resultContainer = document.getElementById("resultContainer");
             const loading = document.getElementById("loading");
+            const naverBoardToggle = document.getElementById("naverBoardToggle");
+            const LS_NAVER_BOARD = "ais_naver_board_enabled";
+            if (localStorage.getItem(LS_NAVER_BOARD) === "0") {
+                naverBoardToggle.checked = false;
+            } else if (localStorage.getItem(LS_NAVER_BOARD) === "1") {
+                naverBoardToggle.checked = true;
+            }
+            naverBoardToggle.addEventListener("change", () => {
+                localStorage.setItem(LS_NAVER_BOARD, naverBoardToggle.checked ? "1" : "0");
+            });
             let stocksData = [];
 
             const getTodayStr = () => {
@@ -355,7 +387,8 @@
                         loading.style.display = "block";
 
                         try {
-                            const url = `/ai/tutorial?corp_code=${stock.corpCode}&corp_name=${encodeURIComponent(stock.corpName)}&market=${encodeURIComponent(stock.market)}`;
+                            const naverBoard = naverBoardToggle.checked;
+                            const url = `/ai/tutorial?corp_code=${stock.corpCode}&corp_name=${encodeURIComponent(stock.corpName)}&market=${encodeURIComponent(stock.market)}&naver_board=${naverBoard}`;
                             const response = await fetch(url, { headers: { Accept: "application/json" } });
 
                             const data = await response.json();
