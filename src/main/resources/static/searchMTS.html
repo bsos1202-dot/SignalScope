@@ -99,6 +99,212 @@
             font-size: 0.88rem;
             margin-bottom: 14px;
         }
+
+        /* 시연 — 최초 진입 웰컴 */
+        .welcome-hero {
+            background: linear-gradient(145deg, #0f2744 0%, #1e4a7a 42%, #2563eb 100%);
+            color: #fff;
+            border-radius: 14px;
+            padding: 18px 16px 20px;
+            margin: 0 0 16px;
+            box-shadow: 0 12px 32px rgba(15, 39, 68, 0.35);
+            position: relative;
+            overflow: hidden;
+        }
+        .welcome-hero::before {
+            content: "";
+            position: absolute;
+            right: -24px;
+            top: -28px;
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+            pointer-events: none;
+        }
+        .welcome-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+        .welcome-brand .product {
+            font-size: 1.35rem;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+        }
+        .welcome-brand .badge-pill {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: rgba(255,255,255,0.2);
+            padding: 4px 8px;
+            border-radius: 999px;
+        }
+        .welcome-hero .tagline {
+            font-size: 0.92rem;
+            line-height: 1.55;
+            color: rgba(255,255,255,0.92);
+            margin: 0 0 12px;
+            position: relative;
+            z-index: 1;
+        }
+        .welcome-hero .tagline strong { color: #fff; font-weight: 700; }
+
+        .flow-strip {
+            display: flex;
+            align-items: stretch;
+            gap: 0;
+            margin: 0 0 14px;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.22);
+            position: relative;
+            z-index: 1;
+        }
+        .flow-step {
+            flex: 1;
+            text-align: center;
+            padding: 10px 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: rgba(255,255,255,0.88);
+            background: rgba(0,0,0,0.15);
+            border-right: 1px solid rgba(255,255,255,0.12);
+        }
+        .flow-step:last-child { border-right: none; }
+        .flow-step .num {
+            display: block;
+            font-size: 0.65rem;
+            font-weight: 800;
+            opacity: 0.85;
+            margin-bottom: 4px;
+            letter-spacing: 0.04em;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .feature-tile {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 10px 11px;
+            text-align: left;
+        }
+        .feature-tile .ico {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-bottom: 6px;
+        }
+        .feature-tile .ico.dart { background: #ecfdf5; }
+        .feature-tile .ico.kis { background: #eff6ff; }
+        .feature-tile .ico.news { background: #fff7ed; }
+        .feature-tile .ico.extra { background: #faf5ff; }
+        .feature-tile h3 {
+            margin: 0 0 2px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .feature-tile p {
+            margin: 0;
+            font-size: 0.68rem;
+            line-height: 1.45;
+            color: var(--text-sub);
+        }
+
+        .section-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin: 0 0 8px;
+        }
+        .search-heading {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--text);
+            letter-spacing: -0.03em;
+            margin: 0 0 6px;
+        }
+
+        .quick-picks {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .quick-pick {
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--blue-mts);
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 999px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .quick-pick:active { background: #eff6ff; transform: scale(0.98); }
+
+        .stock-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.78rem;
+            color: var(--text-sub);
+            margin-bottom: 10px;
+            min-height: 1.2em;
+        }
+        .stock-status .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #fbbf24;
+            flex-shrink: 0;
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+        .stock-status.ready .dot {
+            animation: none;
+            background: #22c55e;
+        }
+        .stock-status.err .dot {
+            animation: none;
+            background: #ef4444;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.45; transform: scale(0.85); }
+        }
+
+        .welcome-callout {
+            background: linear-gradient(90deg, #fef3c7 0%, #fffbeb 100%);
+            border: 1px solid #fde68a;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 0.78rem;
+            color: #92400e;
+            line-height: 1.5;
+            margin-bottom: 14px;
+        }
+        .welcome-callout strong { color: #78350f; }
+
         .search-box-wrap { position: relative; margin-bottom: 12px; }
         .search-box-wrap input {
             width: 100%;
@@ -540,12 +746,70 @@
     <div class="phone-wrap">
         <div id="loading-overlay"><div class="spinner"></div><span>AI 분석 중…</span></div>
 
-        <section id="screen-search">
-            <h1>종목 검색</h1>
-            <p class="lead">검색 후 한화 MTS와 유사한 상세 화면에서 API 기반 AI 요약·근거를 확인합니다. 최종 노출 위치는 기획 확정 후 조정 예정입니다.</p>
+        <section id="screen-search" aria-labelledby="searchHeading">
+            <div class="welcome-hero">
+                <div class="welcome-brand">
+                    <span class="product">SignalScope</span>
+                    <span class="badge-pill">AIS · MTS 시연</span>
+                </div>
+                <p class="tagline">
+                    국내 종목을 고르면 <strong>DART · 한국투자증권 · 뉴스 · 한화 WM 리서치 · (선택) 네이버 종목토론</strong>을 모아
+                    OpenAI가 <strong>「왜 움직였는지(WHY)」</strong>를 쉬운 말로 정리합니다. 아래는 실제 MTS가 아닌 <strong>시연용 UI</strong>입니다.
+                </p>
+                <div class="flow-strip" role="list" aria-label="시연 흐름">
+                    <div class="flow-step" role="listitem"><span class="num">STEP 1</span>종목 검색·선택</div>
+                    <div class="flow-step" role="listitem"><span class="num">STEP 2</span>데이터 수집·캐시</div>
+                    <div class="flow-step" role="listitem"><span class="num">STEP 3</span>MTS형 WHY 카드</div>
+                </div>
+            </div>
+
+            <div class="feature-grid" aria-label="프로젝트에 반영되는 데이터 소스">
+                <div class="feature-tile">
+                    <div class="ico dart" aria-hidden="true">D</div>
+                    <h3>DART</h3>
+                    <p>공시·재무·지분·원문 발췌를 근거로 노출합니다.</p>
+                </div>
+                <div class="feature-tile">
+                    <div class="ico kis" aria-hidden="true">K</div>
+                    <h3>한국투자증권</h3>
+                    <p>PER·RSI·체결강도 등 시세 맥락 지표를 반영합니다.</p>
+                </div>
+                <div class="feature-tile">
+                    <div class="ico news" aria-hidden="true">뉴</div>
+                    <h3>뉴스</h3>
+                    <p>네이버·구글, 종목·시장 키워드 뉴스를 함께 봅니다.</p>
+                </div>
+                <div class="feature-tile">
+                    <div class="ico extra" aria-hidden="true">＋</div>
+                    <h3>리서치·토론</h3>
+                    <p>한화 WM 리서치 목록, 옵션으로 네이버 토론 스크랩.</p>
+                </div>
+            </div>
+
+            <div class="welcome-callout" role="note">
+                <strong>시연 팁:</strong> 상단 체크박스로 네이버 종목토론 포함 여부를 바꿀 수 있습니다.
+                종목 선택 후 <strong>AI WHY</strong> 탭에서 요약·근거(공시·뉴스 링크)를 펼쳐 보세요. 응답 헤더의 파일 캐시 HIT/MISS도 확인할 수 있습니다.
+            </div>
+
+            <h1 id="searchHeading" class="search-heading">종목 검색</h1>
+            <p class="lead">아래 입력창에 종목명·코드를 입력해 자동완성에서 선택하면, MTS 스타일 상세로 이동합니다.</p>
+
+            <div class="stock-status" id="stockListStatus" aria-live="polite">
+                <span class="dot" aria-hidden="true"></span>
+                <span id="stockListStatusText">종목 마스터를 불러오는 중…</span>
+            </div>
+
+            <p class="section-label" style="margin-bottom:6px;">빠른 입력 (데모)</p>
+            <div class="quick-picks" role="group" aria-label="빠른 검색어">
+                <button type="button" class="quick-pick" data-quick-search="삼성">삼성전자 계열</button>
+                <button type="button" class="quick-pick" data-quick-search="LG">LG</button>
+                <button type="button" class="quick-pick" data-quick-search="네이버">네이버</button>
+                <button type="button" class="quick-pick" data-quick-search="032640">032640</button>
+            </div>
+
             <div class="search-box-wrap">
-                <input type="text" id="searchInput" placeholder="종목명 또는 코드 (예: LG, 032640)" autocomplete="off">
-                <ul id="autoCompleteList" class="autocomplete-list"></ul>
+                <input type="text" id="searchInput" placeholder="종목명 또는 6자리 코드 (예: SK, 005930)" autocomplete="off" aria-describedby="searchHeading stockListStatusText">
+                <ul id="autoCompleteList" class="autocomplete-list" role="listbox" aria-label="검색 결과"></ul>
             </div>
         </section>
 
@@ -872,6 +1136,17 @@
             });
 
             let stocksData = [];
+            const stockStatusEl = document.getElementById("stockListStatus");
+            const stockStatusTextEl = document.getElementById("stockListStatusText");
+
+            function setStockListStatus(kind, message) {
+                if (!stockStatusEl || !stockStatusTextEl) return;
+                stockStatusEl.classList.remove("ready", "err");
+                if (kind === "ready") stockStatusEl.classList.add("ready");
+                if (kind === "err") stockStatusEl.classList.add("err");
+                stockStatusTextEl.textContent = message;
+            }
+
             const getTodayStr = function () {
                 const now = new Date();
                 return now.getFullYear() + String(now.getMonth() + 1).padStart(2, "0") + String(now.getDate()).padStart(2, "0");
@@ -880,17 +1155,36 @@
             const cachedDate = localStorage.getItem("stocks_cache_date");
 
             (async function loadStocks() {
-                if (cachedDate !== todayStr) {
-                    try {
+                try {
+                    if (cachedDate !== todayStr) {
                         const response = await fetch("/api/stocks/all");
+                        if (!response.ok) throw new Error("HTTP " + response.status);
                         stocksData = await response.json();
                         localStorage.setItem("stocks_cache_data", JSON.stringify(stocksData));
                         localStorage.setItem("stocks_cache_date", todayStr);
-                    } catch (e) { console.error(e); }
-                } else {
-                    try { stocksData = JSON.parse(localStorage.getItem("stocks_cache_data") || "[]"); } catch (e) { stocksData = []; }
+                    } else {
+                        try { stocksData = JSON.parse(localStorage.getItem("stocks_cache_data") || "[]"); } catch (e) { stocksData = []; }
+                    }
+                    const n = Array.isArray(stocksData) ? stocksData.length : 0;
+                    if (n > 0) {
+                        setStockListStatus("ready", "종목 " + n + "건 로드됨 · 검색창에 입력해 보세요");
+                    } else {
+                        setStockListStatus("err", "종목 목록이 비어 있습니다. /api/stocks/all 을 확인하세요.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    setStockListStatus("err", "종목 목록을 불러오지 못했습니다. 애플리케이션 서버 실행 여부를 확인하세요.");
                 }
             })();
+
+            document.querySelectorAll(".quick-pick[data-quick-search]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    const q = btn.getAttribute("data-quick-search") || "";
+                    input.value = q;
+                    input.focus();
+                    input.dispatchEvent(new Event("input", { bubbles: true }));
+                });
+            });
 
             input.addEventListener("input", function () {
                 const val = this.value.trim();
