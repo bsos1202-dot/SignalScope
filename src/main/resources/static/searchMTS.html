@@ -753,7 +753,7 @@
                     <span class="badge-pill">AIS · MTS 시연</span>
                 </div>
                 <p class="tagline">
-                    국내 종목을 고르면 <strong>DART · 한국투자증권 · 뉴스 · 한화 WM 리서치 · (선택) 네이버 종목토론</strong>을 모아
+                    국내 종목을 고르면 <strong id="welcomeSourcesLine">DART · 시세·지표 API · 뉴스 · 리서치 · (선택) 네이버 종목토론</strong>을 모아
                     OpenAI가 <strong>「왜 움직였는지(WHY)」</strong>를 쉬운 말로 정리합니다. 아래는 실제 MTS가 아닌 <strong>시연용 UI</strong>입니다.
                 </p>
                 <div class="flow-strip" role="list" aria-label="시연 흐름">
@@ -771,8 +771,8 @@
                 </div>
                 <div class="feature-tile">
                     <div class="ico kis" aria-hidden="true">K</div>
-                    <h3>한국투자증권</h3>
-                    <p>PER·RSI·체결강도 등 시세 맥락 지표를 반영합니다.</p>
+                    <h3 id="welcomeMarketTitle">시세·지표</h3>
+                    <p id="welcomeMarketDesc">종목 선택 후 AI 분석 응답에 표시되는 출처 기준 시세 맥락 지표를 반영합니다.</p>
                 </div>
                 <div class="feature-tile">
                     <div class="ico news" aria-hidden="true">뉴</div>
@@ -782,7 +782,7 @@
                 <div class="feature-tile">
                     <div class="ico extra" aria-hidden="true">＋</div>
                     <h3>리서치·토론</h3>
-                    <p>한화 WM 리서치 목록, 옵션으로 네이버 토론 스크랩.</p>
+                    <p id="welcomeResearchDesc">리서치 목록(응답에 표시되는 출처), 옵션으로 네이버 토론 스크랩.</p>
                 </div>
             </div>
 
@@ -949,11 +949,22 @@
             return escapeHtml(text).replace(/\n/g, "<br>");
         }
 
+        function evidenceMarketLabel(ev) {
+            const s = (ev && ev.marketDataProviderLabel) ? String(ev.marketDataProviderLabel).trim() : "";
+            return s || "시세·지표";
+        }
+        function evidenceResearchLabel(ev) {
+            const s = (ev && ev.researchProviderLabel) ? String(ev.researchProviderLabel).trim() : "";
+            return s || "리서치";
+        }
+
         function buildEvidenceHtml(ev) {
             const km = ev.kisMarketMetrics || {};
+            const mktTitle = evidenceMarketLabel(ev) + " — 시세·지표";
+            const resTitle = evidenceResearchLabel(ev) + " 리서치(종목 매칭)";
             let html = "";
             if (km.per || km.pbr || km.rsi || km.contractStrength || km.llmContextBlock) {
-                html += '<div class="evidence-section"><h4>한국투자증권 — 시세·지표</h4><ul>';
+                html += '<div class="evidence-section"><h4>' + escapeHtml(mktTitle) + "</h4><ul>";
                 function mrow(label, val) {
                     if (val) html += "<li><strong>" + escapeHtml(label) + "</strong> " + escapeHtml(val) + "</li>";
                 }
@@ -1010,7 +1021,7 @@
             newsList("네이버 뉴스(시장)", ev.naverNewsMarket || [], "link", "title", "publishedAt", "description");
             newsList("구글 뉴스(시장)", ev.googleNewsMarket || [], "link", "title", "publishedAt", null);
             if ((ev.hanwhaResearch || []).length > 0) {
-                html += '<div class="evidence-section"><h4>한화 WM 리서치(종목 매칭)</h4><ul>';
+                html += '<div class="evidence-section"><h4>' + escapeHtml(resTitle) + "</h4><ul>";
                 (ev.hanwhaResearch || []).forEach(function (r) {
                     let t = escapeHtml(r.title || "");
                     if (r.link) t = '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener">' + t + "</a>";
@@ -1073,7 +1084,7 @@
             h += "<span class=\"chip\">공시 " + dDart + "</span>";
             h += "<span class=\"chip\">주요 " + dMajor + "</span>";
             h += "<span class=\"chip\">뉴스 " + newsTotal + "</span>";
-            h += "<span class=\"chip\">한화 " + nHanwha + "</span>";
+            h += "<span class=\"chip\">" + escapeHtml(evidenceResearchLabel(ev)) + " " + nHanwha + "</span>";
             h += "<span class=\"chip\">토론 " + nBoard + "</span>";
             return h || "<span class=\"muted\">지표 없음</span>";
         }
@@ -1088,8 +1099,28 @@
             el.innerHTML = html || "<span class=\"muted\">DART 발췌 없음</span>";
         }
 
+        function applyWelcomeFromEvidence(ev) {
+            const m = evidenceMarketLabel(ev);
+            const r = evidenceResearchLabel(ev);
+            const line = document.getElementById("welcomeSourcesLine");
+            if (line) {
+                line.textContent = "DART · " + m + " · 뉴스 · " + r + " 리서치 · (선택) 네이버 종목토론";
+            }
+            const wm = document.getElementById("welcomeMarketTitle");
+            if (wm) wm.textContent = m;
+            const wmd = document.getElementById("welcomeMarketDesc");
+            if (wmd) {
+                wmd.textContent = "PER·RSI·체결강도 등 시세 맥락 지표를 반영합니다. (출처: " + m + ")";
+            }
+            const wr = document.getElementById("welcomeResearchDesc");
+            if (wr) {
+                wr.textContent = r + " 리서치 목록, 옵션으로 네이버 토론 스크랩.";
+            }
+        }
+
         function applyTutorialToMts(stock, data, cacheNote) {
             const ev = data.evidence || {};
+            applyWelcomeFromEvidence(ev);
             document.getElementById("mtsStockName").textContent = stock.corpName;
             document.getElementById("mtsTopMeta").textContent =
                 stock.corpCode + " | " + (stock.market || "—") + " | 시연";
@@ -1109,6 +1140,8 @@
             document.getElementById("mtsChips").innerHTML = chips;
             document.getElementById("homeChips").innerHTML = chips;
 
+            const evDetails = document.getElementById("mtsEvidenceDetails");
+            if (evDetails) evDetails.open = false;
             document.getElementById("mtsEvidenceBody").innerHTML = buildEvidenceHtml(ev);
             document.getElementById("mtsNewsOnly").innerHTML = buildNewsCompact(ev);
             fillDartInfoPanel(ev);
@@ -1204,7 +1237,13 @@
                             const naverBoard = naverBoardToggle.checked;
                             const url = "/ai/tutorial?corp_code=" + stock.corpCode + "&corp_name=" + encodeURIComponent(stock.corpName) + "&market=" + encodeURIComponent(stock.market || "") + "&naver_board=" + naverBoard;
                             const response = await fetch(url, { headers: { Accept: "application/json" } });
-                            const data = await response.json();
+                            const raw = await response.text();
+                            let data = {};
+                            try {
+                                data = raw ? JSON.parse(raw) : {};
+                            } catch (parseErr) {
+                                console.error(parseErr);
+                            }
                             if (!response.ok) {
                                 alert(data.error || "분석을 불러오지 못했습니다.");
                                 return;

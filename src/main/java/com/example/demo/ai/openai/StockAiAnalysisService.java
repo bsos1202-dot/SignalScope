@@ -67,6 +67,12 @@ public class StockAiAnalysisService {
     @Value("${app.news.google.market-display-count:3}")
     private int googleNewsMarketDisplayCount;
 
+    @Value("${app.tutorial-ui.market-data-provider-label:한국투자증권}")
+    private String tutorialMarketDataProviderLabel;
+
+    @Value("${app.tutorial-ui.research-provider-label:한화 WM}")
+    private String tutorialResearchProviderLabel;
+
     private final DartApiClient dartApiClient;
     private final DartDailyFileCacheService dartDailyFileCacheService;
     private final MarketNewsFileCacheService marketNewsFileCacheService;
@@ -553,7 +559,9 @@ public class StockAiAnalysisService {
                 toGoogleNewsRefs(googleRssMarket),
                 toHanwhaResearchRefs(hanwhaResearchItems),
                 toBoardRefs(boardPosts),
-                boardSentimentHint
+                boardSentimentHint,
+                tutorialMarketDataProviderLabel,
+                tutorialResearchProviderLabel
         );
     }
 

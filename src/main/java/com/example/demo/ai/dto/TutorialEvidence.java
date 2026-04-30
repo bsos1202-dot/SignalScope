@@ -19,7 +19,9 @@ public record TutorialEvidence(
         List<NewsRef> googleNewsMarket,
         List<HanwhaResearchRef> hanwhaResearch,
         List<BoardRef> boardPosts,
-        String boardSentimentHint
+        String boardSentimentHint,
+        String marketDataProviderLabel,
+        String researchProviderLabel
 ) {
     public record DisclosureRef(String receiptDate, String reportName, String receiptNo) {}
 
